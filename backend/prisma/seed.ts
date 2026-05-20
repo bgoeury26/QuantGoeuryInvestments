@@ -4,19 +4,13 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  const adminPassword = await bcrypt.hash('Admin@QuantGoeury2024!', 12);
+  const hash = await bcrypt.hash('Admin@QuantGoeury2024!', 12);
   await prisma.user.upsert({
     where: { email: 'goeurybenjamin@gmail.com' },
     update: {},
-    create: {
-      email: 'goeurybenjamin@gmail.com',
-      password: adminPassword,
-      name: 'Benjamin Goeury',
-      role: UserRole.ADMIN,
-      status: UserStatus.APPROVED,
-    },
+    create: { email: 'goeurybenjamin@gmail.com', password: hash, name: 'Benjamin Goeury', role: UserRole.ADMIN, status: UserStatus.APPROVED },
   });
-  console.log('✅ Admin user seeded: goeurybenjamin@gmail.com');
+  console.log('\u2705 Admin user seeded');
 
   const stocks = [
     { symbol: 'AAPL', name: 'Apple Inc.', sector: 'Technology' },
@@ -38,17 +32,12 @@ async function main() {
     { symbol: 'AVGO', name: 'Broadcom Inc.', sector: 'Technology' },
     { symbol: 'MRK', name: 'Merck & Co. Inc.', sector: 'Healthcare' },
     { symbol: 'CVX', name: 'Chevron Corporation', sector: 'Energy' },
-    { symbol: 'COST', name: 'Costco Wholesale', sector: 'Consumer Defensive' },
+    { symbol: 'COIN', name: 'Coinbase Global Inc.', sector: 'Financial Services' },
   ];
-
-  for (const stock of stocks) {
-    await prisma.stock.upsert({
-      where: { symbol: stock.symbol },
-      update: {},
-      create: stock,
-    });
+  for (const s of stocks) {
+    await prisma.stock.upsert({ where: { symbol: s.symbol }, update: {}, create: s });
   }
-  console.log(`✅ Seeded ${stocks.length} stocks`);
+  console.log(`\u2705 Seeded ${stocks.length} stocks`);
 }
 
 main().catch(console.error).finally(() => prisma.$disconnect());

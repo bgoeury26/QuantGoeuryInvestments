@@ -7,26 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  SUSPENDED
-}
-
-enum UserRole {
-  USER
-  ADMIN
-}
-
-enum SignalType {
-  ACCUMULATION
-  MOMENTUM_IGNITION
-  SENTIMENT_PUMP
-  SMART_MONEY_ENTRY
-  RISK_WARNING
-  NEUTRAL
-}
+enum UserStatus { PENDING APPROVED REJECTED SUSPENDED }
+enum UserRole { USER ADMIN }
+enum SignalType { ACCUMULATION MOMENTUM_IGNITION SENTIMENT_PUMP SMART_MONEY_ENTRY RISK_WARNING NEUTRAL }
 
 model User {
   id        String     @id @default(cuid())
@@ -97,7 +80,6 @@ model StockScore {
   rankingScore       Float    @default(0)
   anomalyScore       Float    @default(0)
   computedAt         DateTime @default(now())
-
   @@index([stockId])
   @@index([rankingScore])
 }
@@ -113,7 +95,6 @@ model StockSignal {
   earlyFlag   Boolean    @default(false)
   detectedAt  DateTime   @default(now())
   expiresAt   DateTime?
-
   @@index([stockId])
   @@index([detectedAt])
 }
@@ -126,7 +107,6 @@ model ApiCache {
   symbol    String?
   createdAt DateTime @default(now())
   expiresAt DateTime
-
   @@index([cacheKey])
   @@index([expiresAt])
 }
@@ -138,7 +118,6 @@ model Watchlist {
   stockId String
   stock   Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
   addedAt DateTime @default(now())
-
   @@unique([userId, stockId])
 }
 
@@ -151,6 +130,5 @@ model Report {
   content   Json
   pdfPath   String?
   createdAt DateTime @default(now())
-
   @@index([userId])
 }
