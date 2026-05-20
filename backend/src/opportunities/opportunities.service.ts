@@ -1,54 +1,53 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ScoringService } from '../scoring/scoring.service';
+import { AlphaService } from '../alpha/alpha.service';
 
 @Injectable()
 export class OpportunitiesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private scoring: ScoringService, private alpha: AlphaService) {}
 
   async getTopOpportunities(limit = 10) {
-    const scores = await this.prisma.stockScore.findMany({
-      distinct: ['stockId'],
-      orderBy: { computedAt: 'desc' },
-      where: { computedAt: { gt: new Date(Date.now() - 24 * 3600 * 1000) } },
+    // Get all stocks with latest scores + signals
+    const stocks = await this.prisma.stock.findMany({
       include: {
-        stock: {
-          include: {
-            signals: { where: { expiresAt: { gt: new Date() } }, orderBy: { strength: 'desc' }, take: 1 },
-          },
-        },
+        scores: { orderBy: { computedAt: 'desc' }, take: 1 },
+        signals: { where: { earlyFlag: true, expiresAt: { gt: new Date() } }, orderBy: { strength: 'desc' }, take: 1 },
       },
     });
 
-    return scores
+    const ranked = stocks
+      .filter(s => s.scores.length > 0)
+      .map(s => {
+        const score = s.scores[0];
+        const signal = s.signals[0];
+        return {
+          stock: { id: s.id, symbol: s.symbol, name: s.name, sector: s.sector, lastPrice: s.lastPrice, priceChangePct: s.priceChangePct },
+          finalScore: score.finalScore,
+          rankingScore: score.rankingScore,
+          anomalyScore: score.anomalyScore,
+          confidenceFactor: score.confidenceFactor,
+          signalType: signal?.signalType || 'NEUTRAL',
+          earlyOpportunity: !!signal?.earlyFlag,
+          keyDrivers: signal?.drivers || [],
+          scores: {
+            fundamental: score.fundamentalScore,
+            technical: score.technicalScore,
+            sentiment: score.sentimentScore,
+            institutional: score.institutionalScore,
+            analyst: score.analystScore,
+            political: score.politicalScore,
+            macro: score.macroScore,
+          },
+        };
+      })
       .sort((a, b) => b.rankingScore - a.rankingScore)
-      .slice(0, limit)
-      .map(s => ({
-        stock: s.stock,
-        finalScore: s.finalScore,
-        rankingScore: s.rankingScore,
-        anomalyScore: s.anomalyScore,
-        confidenceFactor: s.confidenceFactor,
-        signalType: s.stock.signals?.[0]?.signalType || 'NEUTRAL',
-        earlyFlag: s.stock.signals?.[0]?.earlyFlag || false,
-        drivers: s.stock.signals?.[0]?.drivers || [],
-        scores: {
-          fundamental: s.fundamentalScore,
-          technical: s.technicalScore,
-          sentiment: s.sentimentScore,
-          institutional: s.institutionalScore,
-          analyst: s.analystScore,
-          political: s.politicalScore,
-          macro: s.macroScore,
-        },
-      }));
+      .slice(0, limit);
+
+    return { opportunities: ranked, generatedAt: new Date().toISOString(), count: ranked.length };
   }
 
-  async getEarlyOpportunities() {
-    return this.prisma.stockSignal.findMany({
-      where: { earlyFlag: true, expiresAt: { gt: new Date() } },
-      include: { stock: { include: { scores: { orderBy: { computedAt: 'desc' }, take: 1 } } } },
-      orderBy: { strength: 'desc' },
-      take: 20,
-    });
+  async getEarlySignals() {
+    return this.alpha.getEarlyOpportunities();
   }
 }

@@ -4,16 +4,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { AdminService } from './admin.service';
 
-@ApiTags('admin')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AdminGuard)
-@Controller('admin')
+@ApiTags('admin') @ApiBearerAuth() @UseGuards(JwtAuthGuard, AdminGuard) @Controller('admin')
 export class AdminController {
-  constructor(private adminService: AdminService) {}
-  @Get('users') getAllUsers() { return this.adminService.getAllUsers(); }
-  @Get('users/pending') getPending() { return this.adminService.getPendingUsers(); }
-  @Get('stats') getStats() { return this.adminService.getStats(); }
-  @Patch('users/:id/approve') approve(@Param('id') id: string) { return this.adminService.approveUser(id); }
-  @Patch('users/:id/reject') reject(@Param('id') id: string) { return this.adminService.rejectUser(id); }
-  @Patch('users/:id/suspend') suspend(@Param('id') id: string) { return this.adminService.suspendUser(id); }
+  constructor(private s: AdminService) {}
+  @Get('users') getAll() { return this.s.getAllUsers(); }
+  @Get('users/pending') getPending() { return this.s.getPendingUsers(); }
+  @Patch('users/:id/approve') approve(@Param('id') id: string) { return this.s.approveUser(id); }
+  @Patch('users/:id/reject') reject(@Param('id') id: string) { return this.s.rejectUser(id); }
+  @Patch('users/:id/suspend') suspend(@Param('id') id: string) { return this.s.suspendUser(id); }
+  @Get('stats') getStats() { return this.s.getStats(); }
 }

@@ -6,11 +6,7 @@ import axios from 'axios';
 
 @Injectable()
 export class StocksService {
-  constructor(
-    private prisma: PrismaService,
-    private cache: CacheService,
-    private config: ConfigService,
-  ) {}
+  constructor(private prisma: PrismaService, private cache: CacheService, private config: ConfigService) {}
 
   getAll() {
     return this.prisma.stock.findMany({
@@ -23,24 +19,24 @@ export class StocksService {
   }
 
   async getBySymbol(symbol: string) {
-    const stock = await this.prisma.stock.findUnique({
+    const s = await this.prisma.stock.findUnique({
       where: { symbol: symbol.toUpperCase() },
       include: {
         scores: { orderBy: { computedAt: 'desc' }, take: 1 },
         signals: { where: { expiresAt: { gt: new Date() } }, orderBy: { strength: 'desc' }, take: 5 },
       },
     });
-    if (!stock) throw new NotFoundException(`Stock ${symbol} not found`);
-    return stock;
+    if (!s) throw new NotFoundException(`Stock ${symbol} not found`);
+    return s;
   }
 
   async getQuote(symbol: string) {
     const cached = await this.cache.get('quote', { symbol });
     if (cached) return cached;
-    const apiKey = this.config.get('FINNHUB_API_KEY');
-    if (!apiKey) return null;
+    const key = this.config.get('FINNHUB_API_KEY');
+    if (!key) return null;
     try {
-      const { data } = await axios.get(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`);
+      const { data } = await axios.get(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${key}`);
       await this.cache.set('quote', { symbol }, data, 300);
       return data;
     } catch { return null; }
@@ -49,15 +45,15 @@ export class StocksService {
   async getFundamentals(symbol: string) {
     const cached = await this.cache.get('fundamentals', { symbol });
     if (cached) return cached;
-    const apiKey = this.config.get('FMP_API_KEY');
-    if (!apiKey) return null;
+    const key = this.config.get('FMP_API_KEY');
+    if (!key) return null;
     try {
-      const [profile, ratios, growth] = await Promise.all([
-        axios.get(`https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${apiKey}`),
-        axios.get(`https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${apiKey}`),
-        axios.get(`https://financialmodelingprep.com/api/v3/financial-growth/${symbol}?limit=1&apikey=${apiKey}`),
+      const [p, r, g] = await Promise.all([
+        axios.get(`https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${key}`),
+        axios.get(`https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${key}`),
+        axios.get(`https://financialmodelingprep.com/api/v3/financial-growth/${symbol}?limit=1&apikey=${key}`),
       ]);
-      const result = { profile: profile.data?.[0], ratios: ratios.data?.[0], growth: growth.data?.[0] };
+      const result = { profile: p.data?.[0], ratios: r.data?.[0], growth: g.data?.[0] };
       await this.cache.set('fundamentals', { symbol }, result, 86400);
       return result;
     } catch { return null; }
@@ -66,12 +62,12 @@ export class StocksService {
   async getTechnicals(symbol: string) {
     const cached = await this.cache.get('technicals', { symbol });
     if (cached) return cached;
-    const apiKey = this.config.get('ALPHA_VANTAGE_API_KEY');
-    if (!apiKey) return null;
+    const key = this.config.get('ALPHA_VANTAGE_API_KEY');
+    if (!key) return null;
     try {
       const [rsi, macd] = await Promise.all([
-        axios.get(`https://www.alphavantage.co/query?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${apiKey}`),
-        axios.get(`https://www.alphavantage.co/query?function=MACD&symbol=${symbol}&interval=daily&series_type=close&apikey=${apiKey}`),
+        axios.get(`https://www.alphavantage.co/query?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${key}`),
+        axios.get(`https://www.alphavantage.co/query?function=MACD&symbol=${symbol}&interval=daily&series_type=close&apikey=${key}`),
       ]);
       const result = { rsi: rsi.data?.['Technical Analysis: RSI'], macd: macd.data?.['Technical Analysis: MACD'] };
       await this.cache.set('technicals', { symbol }, result, 3600);
@@ -82,14 +78,14 @@ export class StocksService {
   async getAnalystRatings(symbol: string) {
     const cached = await this.cache.get('analyst', { symbol });
     if (cached) return cached;
-    const apiKey = this.config.get('FINNHUB_API_KEY');
-    if (!apiKey) return null;
+    const key = this.config.get('FINNHUB_API_KEY');
+    if (!key) return null;
     try {
-      const [rec, target] = await Promise.all([
-        axios.get(`https://finnhub.io/api/v1/stock/recommendation?symbol=${symbol}&token=${apiKey}`),
-        axios.get(`https://finnhub.io/api/v1/stock/price-target?symbol=${symbol}&token=${apiKey}`),
+      const [rec, tgt] = await Promise.all([
+        axios.get(`https://finnhub.io/api/v1/stock/recommendation?symbol=${symbol}&token=${key}`),
+        axios.get(`https://finnhub.io/api/v1/stock/price-target?symbol=${symbol}&token=${key}`),
       ]);
-      const result = { recommendations: rec.data?.slice(0, 4), priceTarget: target.data };
+      const result = { recommendations: rec.data?.slice(0, 4), priceTarget: tgt.data };
       await this.cache.set('analyst', { symbol }, result, 21600);
       return result;
     } catch { return null; }
@@ -98,10 +94,10 @@ export class StocksService {
   async getHistoricalPrices(symbol: string, days = 200) {
     const cached = await this.cache.get('historical', { symbol, days });
     if (cached) return cached;
-    const apiKey = this.config.get('FMP_API_KEY');
-    if (!apiKey) return [];
+    const key = this.config.get('FMP_API_KEY');
+    if (!key) return [];
     try {
-      const { data } = await axios.get(`https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=${days}&apikey=${apiKey}`);
+      const { data } = await axios.get(`https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=${days}&apikey=${key}`);
       const prices = data?.historical || [];
       await this.cache.set('historical', { symbol, days }, prices, 3600);
       return prices;
@@ -116,10 +112,6 @@ export class StocksService {
   }
 
   upsertStock(symbol: string, data: any) {
-    return this.prisma.stock.upsert({
-      where: { symbol },
-      update: data,
-      create: { symbol, name: data.name || symbol, ...data },
-    });
+    return this.prisma.stock.upsert({ where: { symbol }, update: data, create: { symbol, name: data.name || symbol, ...data } });
   }
 }
