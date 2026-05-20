@@ -2,155 +2,166 @@
 import AppShell from '@/components/layout/AppShell';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import { CheckCircle2, XCircle, Clock, ShieldCheck, Users, AlertTriangle, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, XCircle, AlertCircle, Users, ShieldCheck, Clock, Ban } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
-import { useAuthStore } from '@/store/auth.store';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
-  PENDING:   { label: 'Pending',   color: 'text-warning bg-warning/10 border-warning/20',  icon: Clock },
-  APPROVED:  { label: 'Approved',  color: 'text-success bg-success/10 border-success/20',  icon: CheckCircle2 },
-  REJECTED:  { label: 'Rejected',  color: 'text-danger  bg-danger/10  border-danger/20',   icon: XCircle },
-  SUSPENDED: { label: 'Suspended', color: 'text-muted   bg-surface-3  border-border',       icon: AlertTriangle },
+type UserStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
+
+interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  status: UserStatus;
+  createdAt: string;
+}
+
+const statusConfig: Record<UserStatus, { label: string; icon: React.ReactNode; cls: string }> = {
+  PENDING:   { label: 'Pending',   icon: <Clock       className="w-3.5 h-3.5" />, cls: 'text-warning  bg-warning/10  border-warning/30'  },
+  APPROVED:  { label: 'Approved',  icon: <CheckCircle2 className="w-3.5 h-3.5" />, cls: 'text-success  bg-success/10  border-success/30'  },
+  REJECTED:  { label: 'Rejected',  icon: <XCircle      className="w-3.5 h-3.5" />, cls: 'text-danger   bg-danger/10   border-danger/30'   },
+  SUSPENDED: { label: 'Suspended', icon: <Ban          className="w-3.5 h-3.5" />, cls: 'text-muted    bg-muted/10    border-muted/30'    },
 };
 
 export default function AdminPage() {
-  const { user } = useAuthStore();
-  const router = useRouter();
   const qc = useQueryClient();
+  const [filter, setFilter] = useState<UserStatus | 'ALL'>('ALL');
 
-  // Only admins can access this page
-  useEffect(() => {
-    if (user && user.role !== 'ADMIN') router.replace('/dashboard');
-  }, [user, router]);
-
-  const { data: users, isLoading } = useQuery({
+  const { data: users = [], isLoading } = useQuery<AdminUser[]>({
     queryKey: ['admin-users'],
-    queryFn: () => api.get('/admin/users').then(r => r.data),
-    refetchInterval: 30000,
+    queryFn:  () => api.get('/admin/users').then(r => r.data),
   });
 
-  const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/users/${id}/approve`),
+  const mutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: string }) =>
+      api.post(`/admin/users/${id}/${action}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
   });
 
-  const rejectMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/users/${id}/reject`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
-  });
+  const filtered = filter === 'ALL' ? users : users.filter(u => u.status === filter);
 
-  const suspendMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/users/${id}/suspend`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
-  });
-
-  const pending  = users?.filter((u: any) => u.status === 'PENDING')  ?? [];
-  const approved = users?.filter((u: any) => u.status === 'APPROVED') ?? [];
-  const others   = users?.filter((u: any) => u.status !== 'PENDING' && u.status !== 'APPROVED') ?? [];
-
-  const UserRow = ({ u }: { u: any }) => {
-    const cfg = STATUS_CONFIG[u.status] ?? STATUS_CONFIG.PENDING;
-    const Icon = cfg.icon;
-    const isPending = u.status === 'PENDING';
-    const isApproved = u.status === 'APPROVED';
-    const isAdmin = u.role === 'ADMIN';
-
-    return (
-      <div className={cn(
-        'flex items-center justify-between p-3.5 rounded-xl border transition-colors',
-        isPending ? 'border-warning/30 bg-warning/5' : 'border-border bg-surface hover:bg-surface-2'
-      )}>
-        <div className="flex items-center gap-3">
-          <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-            isAdmin ? 'bg-primary/20 text-primary' : 'bg-surface-3 text-muted')}>
-            {u.name?.[0]?.toUpperCase() ?? '?'}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium text-text">{u.name}</p>
-              {isAdmin && <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">Admin</span>}
-            </div>
-            <p className="text-xs text-muted">{u.email} · joined {timeAgo(u.createdAt)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={cn('flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border', cfg.color)}>
-            <Icon className="w-3 h-3" />{cfg.label}
-          </span>
-          {isPending && (
-            <>
-              <button onClick={() => approveMutation.mutate(u.id)}
-                disabled={approveMutation.isPending}
-                className="h-7 px-3 rounded-lg text-xs font-medium bg-success/10 text-success border border-success/20 hover:bg-success/20 transition-colors flex items-center gap-1">
-                {approveMutation.isPending ? <RefreshCw className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                Approve
-              </button>
-              <button onClick={() => rejectMutation.mutate(u.id)}
-                disabled={rejectMutation.isPending}
-                className="h-7 px-3 rounded-lg text-xs font-medium bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 transition-colors flex items-center gap-1">
-                <XCircle className="w-3 h-3" /> Reject
-              </button>
-            </>
-          )}
-          {isApproved && !isAdmin && (
-            <button onClick={() => suspendMutation.mutate(u.id)}
-              disabled={suspendMutation.isPending}
-              className="h-7 px-3 rounded-lg text-xs font-medium bg-surface-3 text-muted border border-border hover:text-danger hover:border-danger/30 transition-colors">
-              Suspend
-            </button>
-          )}
-        </div>
-      </div>
-    );
+  const counts = {
+    ALL:       users.length,
+    PENDING:   users.filter(u => u.status === 'PENDING').length,
+    APPROVED:  users.filter(u => u.status === 'APPROVED').length,
+    REJECTED:  users.filter(u => u.status === 'REJECTED').length,
+    SUSPENDED: users.filter(u => u.status === 'SUSPENDED').length,
   };
 
   return (
     <AppShell title="Admin Panel">
-      {/* Header stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { label: 'Pending Approval', value: pending.length,  icon: Clock,        color: 'text-warning', bg: 'bg-warning/10' },
-          { label: 'Approved Users',   value: approved.length, icon: CheckCircle2, color: 'text-success', bg: 'bg-success/10' },
-          { label: 'Total Users',      value: users?.length ?? 0, icon: Users,     color: 'text-primary', bg: 'bg-primary/10' },
-        ].map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="card p-4 flex items-center gap-3">
-            <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0', bg)}>
-              <Icon className={cn('w-4 h-4', color)} />
+      {/* Stats row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {([
+          { key: 'PENDING',  label: 'Awaiting approval', icon: <Clock       className="w-4 h-4 text-warning"  />, count: counts.PENDING  },
+          { key: 'APPROVED', label: 'Active users',       icon: <CheckCircle2 className="w-4 h-4 text-success"  />, count: counts.APPROVED },
+          { key: 'REJECTED', label: 'Rejected',           icon: <XCircle      className="w-4 h-4 text-danger"   />, count: counts.REJECTED },
+          { key: 'ALL',      label: 'Total registered',   icon: <Users        className="w-4 h-4 text-primary"  />, count: counts.ALL      },
+        ] as const).map(s => (
+          <button key={s.key} onClick={() => setFilter(s.key)}
+            className={cn('card p-4 text-left transition-all', filter === s.key ? 'border-primary/50 bg-primary/5' : 'hover:border-border-bright')}>
+            <div className="flex items-center justify-between mb-1">
+              {s.icon}
+              <span className="text-xl font-bold text-text tabular-nums">{s.count}</span>
             </div>
-            <div>
-              <p className="text-xl font-bold text-text tabular-nums">{value}</p>
-              <p className="text-xs text-muted">{label}</p>
-            </div>
-          </div>
+            <p className="text-xs text-muted">{s.label}</p>
+          </button>
         ))}
       </div>
 
-      {/* Pending section */}
-      {pending.length > 0 && (
-        <div className="mb-5">
-          <h2 className="text-sm font-semibold text-warning flex items-center gap-2 mb-3">
-            <Clock className="w-4 h-4" /> Awaiting Approval ({pending.length})
-          </h2>
-          <div className="space-y-2">
-            {pending.map((u: any) => <UserRow key={u.id} u={u} />)}
+      {/* Table */}
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-semibold text-text">
+              {filter === 'ALL' ? 'All Users' : `${statusConfig[filter as UserStatus]?.label} Users`}
+            </h2>
           </div>
+          {counts.PENDING > 0 && (
+            <span className="flex items-center gap-1 text-xs text-warning">
+              <AlertCircle className="w-3.5 h-3.5" />
+              {counts.PENDING} pending approval
+            </span>
+          )}
         </div>
-      )}
 
-      {/* All users */}
-      <div>
-        <h2 className="text-sm font-semibold text-text flex items-center gap-2 mb-3">
-          <ShieldCheck className="w-4 h-4 text-primary" /> All Users
-        </h2>
         {isLoading ? (
-          <div className="space-y-2">
-            {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-16 w-full rounded-xl" />)}
+          <div className="p-6 space-y-3">
+            {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-12 w-full" />)}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-16 text-center">
+            <Users className="w-8 h-8 text-faint mx-auto mb-3" />
+            <p className="text-sm text-muted">No users in this category</p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {[...approved, ...others].map((u: any) => <UserRow key={u.id} u={u} />)}
+          <div className="divide-y divide-border">
+            {filtered.map(user => {
+              const cfg = statusConfig[user.status];
+              const pending = mutation.isPending;
+              return (
+                <div key={user.id} className="flex items-center gap-4 px-5 py-3 hover:bg-surface-2 transition-colors">
+                  {/* Avatar */}
+                  <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                    {user.name[0]?.toUpperCase()}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-text truncate">{user.name}</p>
+                      {user.role === 'ADMIN' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">ADMIN</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted truncate">{user.email} &middot; joined {timeAgo(user.createdAt)}</p>
+                  </div>
+
+                  {/* Status badge */}
+                  <span className={cn('flex items-center gap-1 text-xs px-2 py-1 rounded-lg border font-medium shrink-0', cfg.cls)}>
+                    {cfg.icon} {cfg.label}
+                  </span>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {user.status === 'PENDING' && (
+                      <>
+                        <button
+                          onClick={() => mutation.mutate({ id: user.id, action: 'approve' })}
+                          disabled={pending}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-success/10 text-success hover:bg-success/20 border border-success/30 transition-colors disabled:opacity-50">
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => mutation.mutate({ id: user.id, action: 'reject' })}
+                          disabled={pending}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-danger/10 text-danger hover:bg-danger/20 border border-danger/30 transition-colors disabled:opacity-50">
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {user.status === 'APPROVED' && (
+                      <button
+                        onClick={() => mutation.mutate({ id: user.id, action: 'suspend' })}
+                        disabled={pending}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-warning/10 text-warning hover:bg-warning/20 border border-warning/30 transition-colors disabled:opacity-50">
+                        Suspend
+                      </button>
+                    )}
+                    {(user.status === 'REJECTED' || user.status === 'SUSPENDED') && (
+                      <button
+                        onClick={() => mutation.mutate({ id: user.id, action: 'approve' })}
+                        disabled={pending}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-success/10 text-success hover:bg-success/20 border border-success/30 transition-colors disabled:opacity-50">
+                        Re-approve
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
