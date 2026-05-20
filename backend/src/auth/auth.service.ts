@@ -14,7 +14,7 @@ export class AuthService {
     if (existing) throw new ConflictException("Email already registered");
     const hash = await bcrypt.hash(dto.password, 12);
     const user = await this.usersService.create({ email: dto.email, password: hash, name: dto.name });
-    return { message: "Registration successful. Your account is pending admin approval.", status: user.status };
+    return { message: "Registration successful. Pending admin approval.", status: user.status };
   }
 
   async login(dto: LoginDto) {
@@ -25,7 +25,10 @@ export class AuthService {
     if (user.status === "PENDING") throw new ForbiddenException("Account pending admin approval.");
     if (user.status === "REJECTED") throw new ForbiddenException("Account access rejected.");
     if (user.status === "SUSPENDED") throw new ForbiddenException("Account suspended.");
-    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
-    return { access_token: token, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
+    const payload = { sub: user.id, email: user.email, role: user.role };
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: { id: user.id, email: user.email, name: user.name, role: user.role, status: user.status },
+    };
   }
 }

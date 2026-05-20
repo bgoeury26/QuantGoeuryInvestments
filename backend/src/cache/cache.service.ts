@@ -26,7 +26,7 @@ export class CacheService {
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
     await this.prisma.apiCache.upsert({
       where: { cacheKey: key },
-      update: { data, expiresAt },
+      update: { data, expiresAt, endpoint },
       create: { cacheKey: key, data, endpoint, symbol: params.symbol, expiresAt },
     });
   }
