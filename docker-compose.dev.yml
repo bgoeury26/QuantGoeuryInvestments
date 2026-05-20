@@ -1,0 +1,31 @@
+# Development override — use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: "3.9"
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+      target: development
+    volumes:
+      - ./backend/src:/app/src
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://quant_user:quant_password@postgres:5432/quant_db
+      JWT_SECRET: dev-secret-change-in-production
+      PORT: "3001"
+    command: npm run start:dev
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    volumes:
+      - ./frontend/src:/app/src
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    command: npm run dev
