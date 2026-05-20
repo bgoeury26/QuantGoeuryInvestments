@@ -24,20 +24,20 @@ export class UsersService {
     return this.prisma.user.update({ where: { id }, data: { status } });
   }
 
-  // ── Watchlist ────────────────────────────────────────────────────────────
+  // ── Watchlist ─────────────────────────────────────────────────────────────
 
   async getWatchlist(userId: string) {
-    const rows = await this.prisma.watchlistItem.findMany({
+    const entries = await this.prisma.watchlistEntry.findMany({
       where:   { userId },
       include: { stock: true },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { addedAt: 'desc' },
     });
-    return rows.map(r => r.stock);
+    return entries.map(e => e.stock);
   }
 
   async addToWatchlist(userId: string, stockId: string) {
-    // upsert — silently ignore duplicates
-    return this.prisma.watchlistItem.upsert({
+    // upsert so duplicate calls are idempotent
+    return this.prisma.watchlistEntry.upsert({
       where:  { userId_stockId: { userId, stockId } },
       update: {},
       create: { userId, stockId },
@@ -45,8 +45,8 @@ export class UsersService {
   }
 
   async removeFromWatchlist(userId: string, stockId: string) {
-    return this.prisma.watchlistItem.delete({
-      where: { userId_stockId: { userId, stockId } },
-    }).catch(() => ({ removed: true })); // ignore not-found
+    return this.prisma.watchlistEntry.deleteMany({
+      where: { userId, stockId },
+    });
   }
 }

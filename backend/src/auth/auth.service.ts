@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, ForbiddenException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+  ConflictException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import * as bcrypt from 'bcrypt';
@@ -12,7 +17,10 @@ export class AuthService {
       throw new ConflictException('Email already registered');
     const hash = await bcrypt.hash(dto.password, 12);
     const user = await this.users.create({ ...dto, password: hash });
-    return { message: 'Registration successful. Pending admin approval.', status: user.status };
+    return {
+      message: 'Registration successful. Pending admin approval.',
+      status:  user.status,
+    };
   }
 
   async login(dto: { email: string; password: string }) {
@@ -23,17 +31,22 @@ export class AuthService {
     if (user.status === 'REJECTED')  throw new ForbiddenException('Account access rejected.');
     if (user.status === 'SUSPENDED') throw new ForbiddenException('Account suspended.');
 
-    // Include status in JWT payload so middleware can enforce approval without a DB round-trip
+    // Include status + role in token so middleware / strategy can gate access
+    // without an extra DB lookup on every single request.
     const token = this.jwt.sign({
       sub:    user.id,
       email:  user.email,
       role:   user.role,
-      status: user.status,   // ← was missing; required by JWT strategy
+      status: user.status,   // ← was missing; JWT strategy validates this
     });
-
     return {
       access_token: token,
-      user: { id: user.id, email: user.email, name: user.name, role: user.role, status: user.status },
+      user: {
+        id:    user.id,
+        email: user.email,
+        name:  user.name,
+        role:  user.role,
+      },
     };
   }
 }

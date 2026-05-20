@@ -9,145 +9,146 @@ import * as fs from 'fs';
 @Injectable()
 export class ReportsService {
   constructor(
-    private prisma: PrismaService,
-    private scoring: ScoringService,
-    private alpha: AlphaService,
-    private ai: AiService,
+    private prisma:   PrismaService,
+    private scoring:  ScoringService,
+    private alpha:    AlphaService,
+    private ai:       AiService,
   ) {}
 
   async listReports(userId: string) {
     return this.prisma.report.findMany({
-      where: { userId },
+      where:   { userId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, symbol: true, title: true, createdAt: true, pdfPath: true },
+      select:  { id: true, symbol: true, title: true, createdAt: true, pdfPath: true },
     });
   }
 
   async generateReport(symbol: string, userId: string) {
-    // Gather all data concurrently
-    const [score, signals, aiAnalysis] = await Promise.allSettled([
-      this.scoring.computeScore(symbol),
-      this.alpha.getSignals(symbol),
-      this.ai.analyzeStock(symbol),
+    const sym = symbol.toUpperCase();
+
+    // Gather all data concurrently; failures are non-fatal
+    const [scoreRes, signalsRes, aiRes] = await Promise.allSettled([
+      this.scoring.computeScore(sym),   // now exists — returns latest DB score or placeholder
+      this.alpha.getSignals(sym),        // now exists — returns active signals array
+      this.ai.analyzeStock(sym),
     ]);
 
     const content = {
-      symbol,
+      symbol:      sym,
       generatedAt: new Date().toISOString(),
-      score:     score.status     === 'fulfilled' ? score.value     : null,
-      signals:   signals.status   === 'fulfilled' ? signals.value   : [],
-      analysis:  aiAnalysis.status === 'fulfilled' ? aiAnalysis.value : null,
+      score:    scoreRes.status   === 'fulfilled' ? scoreRes.value   : null,
+      signals:  signalsRes.status === 'fulfilled' ? signalsRes.value : [],
+      analysis: aiRes.status      === 'fulfilled' ? aiRes.value      : null,
     };
 
-    // Save report to DB
+    // Persist report record
     const report = await this.prisma.report.create({
       data: {
         userId,
-        symbol: symbol.toUpperCase(),
-        title: `${symbol.toUpperCase()} Research Report — ${new Date().toLocaleDateString()}`,
+        symbol: sym,
+        title:  `${sym} Research Report — ${new Date().toLocaleDateString('en-GB')}`,
         content,
       },
     });
 
-    // Attempt PDF generation if Puppeteer available
+    // Attempt PDF generation (Puppeteer optional — graceful fallback)
     let pdfBuffer: Buffer | null = null;
     try {
-      pdfBuffer = await this.generatePdf(symbol, content);
+      pdfBuffer = await this.generatePdf(sym, content);
       const dir = path.join(process.cwd(), 'reports');
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const filePath = path.join(dir, `${report.id}.pdf`);
       fs.writeFileSync(filePath, pdfBuffer);
-      await this.prisma.report.update({ where: { id: report.id }, data: { pdfPath: filePath } });
-    } catch { /* PDF optional — JSON report always saved */ }
-
-    return { report, pdf: !!pdfBuffer };
-  }
-
-  async downloadReport(reportId: string): Promise<Buffer> {
-    const report = await this.prisma.report.findUnique({ where: { id: reportId } });
-    if (report?.pdfPath && fs.existsSync(report.pdfPath)) {
-      return fs.readFileSync(report.pdfPath);
+      await this.prisma.report.update({
+        where: { id: report.id },
+        data:  { pdfPath: filePath },
+      });
+      return { ...report, pdfPath: filePath };
+    } catch {
+      // Puppeteer not installed / headless Chrome unavailable — skip PDF silently
+      return report;
     }
-    // Return JSON as fallback
-    return Buffer.from(JSON.stringify(report?.content ?? {}, null, 2));
   }
+
+  async getReport(id: string, userId: string) {
+    return this.prisma.report.findFirst({
+      where: { id, userId },
+    });
+  }
+
+  async getPdf(id: string, userId: string): Promise<Buffer> {
+    const report = await this.prisma.report.findFirst({ where: { id, userId } });
+    if (!report?.pdfPath) throw new Error('PDF not available');
+    return fs.readFileSync(report.pdfPath);
+  }
+
+  // ── PDF generation (Puppeteer) ───────────────────────────────────────────
 
   private async generatePdf(symbol: string, content: any): Promise<Buffer> {
-    const puppeteer = await import('puppeteer').catch(() => null);
-    if (!puppeteer) throw new Error('Puppeteer not available');
-
-    const score = content.score;
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; padding: 40px; }
-    h1 { color: #4f98a3; font-size: 28px; margin-bottom: 4px; }
-    .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 32px; }
-    .section { background: #1c1b19; border: 1px solid #393836; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
-    .section h2 { color: #4f98a3; font-size: 16px; margin: 0 0 12px; }
-    .score-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-    .score-item { background: #0f1117; padding: 12px; border-radius: 6px; text-align: center; }
-    .score-item .val { font-size: 24px; font-weight: 700; color: #4f98a3; }
-    .score-item .lbl { font-size: 11px; color: #6b7280; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    td, th { padding: 8px 12px; border-bottom: 1px solid #262523; text-align: left; }
-    th { color: #6b7280; font-weight: 500; }
-    .signal-badge { background: #1e3a2f; color: #4ade80; padding: 2px 8px; border-radius: 12px; font-size: 11px; }
-    .footer { margin-top: 40px; font-size: 11px; color: #4b5563; text-align: center; }
-  </style>
-</head>
-<body>
-  <h1>QuantGoeuryInvestments</h1>
-  <div class="subtitle">AI Research Report &mdash; ${symbol.toUpperCase()} &mdash; ${new Date().toLocaleDateString('en-GB')}</div>
-
-  <div class="section">
-    <h2>Scoring Engine V2</h2>
-    <div class="score-grid">
-      <div class="score-item"><div class="val">${score?.finalScore?.toFixed(2) ?? 'N/A'}</div><div class="lbl">Final Score</div></div>
-      <div class="score-item"><div class="val">${score?.rankingScore?.toFixed(2) ?? 'N/A'}</div><div class="lbl">Ranking Score</div></div>
-      <div class="score-item"><div class="val">${score?.anomalyScore?.toFixed(2) ?? 'N/A'}</div><div class="lbl">Anomaly Score</div></div>
-      <div class="score-item"><div class="val">${((score?.confidenceFactor ?? 1) * 100).toFixed(0)}%</div><div class="lbl">Confidence</div></div>
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>Score Breakdown</h2>
-    <table>
-      <tr><th>Dimension</th><th>Score</th><th>Weight</th></tr>
-      <tr><td>Fundamental</td><td>${score?.fundamentalScore?.toFixed(2) ?? '-'}</td><td>2.5</td></tr>
-      <tr><td>Technical</td><td>${score?.technicalScore?.toFixed(2) ?? '-'}</td><td>2.0</td></tr>
-      <tr><td>Sentiment</td><td>${score?.sentimentScore?.toFixed(2) ?? '-'}</td><td>1.5</td></tr>
-      <tr><td>Institutional</td><td>${score?.institutionalScore?.toFixed(2) ?? '-'}</td><td>2.0</td></tr>
-      <tr><td>Analyst</td><td>${score?.analystScore?.toFixed(2) ?? '-'}</td><td>1.0</td></tr>
-      <tr><td>Political</td><td>${score?.politicalScore?.toFixed(2) ?? '-'}</td><td>0.5</td></tr>
-      <tr><td>Macro</td><td>${score?.macroScore?.toFixed(2) ?? '-'}</td><td>0.5</td></tr>
-    </table>
-  </div>
-
-  <div class="section">
-    <h2>Active Signals</h2>
-    ${(content.signals ?? []).length === 0
-      ? '<p style="color:#6b7280">No active signals detected.</p>'
-      : (content.signals as any[]).map((s: any) => `<div style="margin-bottom:8px"><span class="signal-badge">${s.signalType}</span> &nbsp; Strength: ${(s.strength * 100).toFixed(0)}% ${s.earlyFlag ? '&nbsp;<span style="color:#f59e0b">⚡ EARLY</span>' : ''}</div>`).join('')}
-  </div>
-
-  <div class="section">
-    <h2>AI Analysis Summary</h2>
-    <p style="color:#6b7280;font-size:13px">${content.analysis?.outlook ?? 'AI analysis not available.'}</p>
-    <p style="margin-top:12px"><strong>Recommendation:</strong> <span style="color:#4f98a3">${content.analysis?.recommendation ?? 'N/A'}</span> &nbsp; Confidence: ${((content.analysis?.confidence ?? 0) * 100).toFixed(0)}%</p>
-  </div>
-
-  <div class="footer">Generated by QuantGoeuryInvestments &bull; ${new Date().toISOString()} &bull; Not financial advice.</div>
-</body>
-</html>`;
-
-    const browser = await (puppeteer as any).launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'], headless: true });
+    // Dynamic import so the app boots fine even without Puppeteer installed
+    const puppeteer = await import('puppeteer');
+    const browser = await puppeteer.default.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' } });
+    await page.setContent(this.buildHtmlReport(symbol, content), { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({ format: 'A4', margin: { top: '24px', right: '24px', bottom: '24px', left: '24px' } });
     await browser.close();
     return Buffer.from(pdf);
+  }
+
+  private buildHtmlReport(symbol: string, content: any): string {
+    const score = content.score;
+    const rows = [
+      ['Final Score',         score?.finalScore?.toFixed(2)         ?? 'N/A'],
+      ['Confidence',          score ? (score.confidenceFactor * 100).toFixed(0) + '%' : 'N/A'],
+      ['Fundamental',         score?.fundamentalScore?.toFixed(2)   ?? 'N/A'],
+      ['Technical',           score?.technicalScore?.toFixed(2)     ?? 'N/A'],
+      ['Sentiment',           score?.sentimentScore?.toFixed(2)     ?? 'N/A'],
+      ['Institutional',       score?.institutionalScore?.toFixed(2) ?? 'N/A'],
+      ['Analyst',             score?.analystScore?.toFixed(2)       ?? 'N/A'],
+      ['Political',           score?.politicalScore?.toFixed(2)     ?? 'N/A'],
+      ['Macro',               score?.macroScore?.toFixed(2)         ?? 'N/A'],
+      ['Anomaly Score',       score?.anomalyScore?.toFixed(2)       ?? 'N/A'],
+      ['Ranking Score',       score?.rankingScore?.toFixed(2)       ?? 'N/A'],
+    ];
+    const signals = (content.signals ?? []).map((s: any) =>
+      `<tr><td>${s.signalType}</td><td>${(s.strength * 100).toFixed(0)}%</td><td>${s.earlyFlag ? '⚡ Early' : '—'}</td></tr>`
+    ).join('');
+    const ai = content.analysis;
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: 'Helvetica Neue', sans-serif; color: #1a1a1a; background: #fff; font-size: 13px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 14px; margin: 18px 0 6px; border-bottom: 1px solid #e5e5e5; padding-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  th, td { padding: 5px 8px; text-align: left; border: 1px solid #e5e5e5; }
+  th { background: #f5f5f5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .score { font-size: 28px; font-weight: 700; color: ${(score?.finalScore ?? 0) >= 7 ? '#16a34a' : (score?.finalScore ?? 0) >= 5 ? '#d97706' : '#dc2626'}; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #f0fdf4; color: #16a34a; }
+  .footer { margin-top: 32px; font-size: 10px; color: #999; border-top: 1px solid #e5e5e5; padding-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>${symbol} — Research Report</h1>
+  <p style="color:#666">Generated ${content.generatedAt}</p>
+  <h2>Composite Score</h2>
+  <p class="score">${score?.finalScore?.toFixed(2) ?? 'N/A'} <span style="font-size:14px;color:#999">/10</span></p>
+  <h2>Score Breakdown</h2>
+  <table><thead><tr><th>Factor</th><th>Value</th></tr></thead><tbody>
+    ${rows.map(([k, v]) => `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`).join('')}
+  </tbody></table>
+  ${signals ? `<h2>Active Signals</h2><table><thead><tr><th>Type</th><th>Strength</th><th>Flag</th></tr></thead><tbody>${signals}</tbody></table>` : ''}
+  ${ai ? `<h2>AI Analysis</h2>
+    ${ai.bullish?.thesis ? `<p><strong>Bullish:</strong> ${ai.bullish.thesis}</p>` : ''}
+    ${ai.bearish?.thesis ? `<p><strong>Bearish:</strong> ${ai.bearish.thesis}</p>` : ''}
+    ${ai.neutral?.thesis ? `<p><strong>Neutral:</strong> ${ai.neutral.thesis}</p>` : ''}` : ''}
+  <div class="footer">QuantGoeuryInvestments &mdash; For informational purposes only. Not financial advice.</div>
+</body>
+</html>`;
   }
 }

@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AlphaService {
   constructor(private prisma: PrismaService) {}
 
-  // ── Anomaly detectors ─────────────────────────────────────────────────────
+  // ── Anomaly detectors ────────────────────────────────────────────────────
 
   detectVolumeAnomaly(current: number, hist: number[]): number {
     if (hist.length < 5) return 0;
@@ -16,10 +16,13 @@ export class AlphaService {
     return Math.min(1, Math.max(0, (z - 1) / 3));
   }
 
-  detectSentimentVelocity(curMentions: number, prevMentions: number, curNews: number, prevNews: number): number {
+  detectSentimentVelocity(
+    curMentions:  number, prevMentions: number,
+    curNews:      number, prevNews:     number,
+  ): number {
     const s: number[] = [];
     if (prevMentions > 0) s.push(Math.min(1, Math.max(0, (curMentions - prevMentions) / prevMentions / 3)));
-    if (prevNews > 0)     s.push(Math.min(1, Math.max(0, (curNews - prevNews) / prevNews / 5)));
+    if (prevNews     > 0) s.push(Math.min(1, Math.max(0, (curNews     - prevNews)     / prevNews     / 5)));
     return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 0;
   }
 
@@ -33,7 +36,9 @@ export class AlphaService {
     return Math.min(1, Math.max(0, (bv - sv * 0.5) / Math.max(bv + sv, 1) + cluster));
   }
 
-  detectInstitutionalShift(cur: number, prev: number, fundsUp: number, total: number): number {
+  detectInstitutionalShift(
+    cur: number, prev: number, fundsUp: number, total: number,
+  ): number {
     if (prev === 0) return 0;
     const change        = (cur - prev) / prev;
     const participation = total > 0 ? fundsUp / total : 0;
@@ -41,14 +46,18 @@ export class AlphaService {
   }
 
   computeAnomalyScore(vol: number, sent: number, insider: number, inst: number): number {
-    return Math.min(1, Math.max(0, vol * 0.30 + sent * 0.25 + insider * 0.25 + inst * 0.20));
+    return Math.min(1, Math.max(0,
+      vol * 0.30 + sent * 0.25 + insider * 0.25 + inst * 0.20,
+    ));
   }
 
-  classifySignal(vol: number, sent: number, insider: number, inst: number, pricePct: number): string {
-    if (insider > 0.6 && inst > 0.4)             return 'SMART_MONEY_ENTRY';
-    if (vol > 0.6 && Math.abs(pricePct) < 0.02)  return 'ACCUMULATION';
-    if (sent > 0.7 && vol > 0.5)                 return 'SENTIMENT_PUMP';
-    if (vol > 0.7 && pricePct > 0.02)            return 'MOMENTUM_IGNITION';
+  classifySignal(
+    vol: number, sent: number, insider: number, inst: number, pricePct: number,
+  ): string {
+    if (insider > 0.6 && inst > 0.4)                    return 'SMART_MONEY_ENTRY';
+    if (vol > 0.6 && Math.abs(pricePct) < 0.02)         return 'ACCUMULATION';
+    if (sent > 0.7 && vol > 0.5)                        return 'SENTIMENT_PUMP';
+    if (vol > 0.7 && pricePct > 0.02)                   return 'MOMENTUM_IGNITION';
     if (vol > 0.5 && insider < 0.1 && pricePct < -0.03) return 'RISK_WARNING';
     return 'NEUTRAL';
   }
@@ -57,7 +66,7 @@ export class AlphaService {
     return anomaly > 0.45 && Math.abs(pricePct) < 0.03;
   }
 
-  // ── DB queries ────────────────────────────────────────────────────────────
+  // ── DB queries ───────────────────────────────────────────────────────────
 
   async getLatestSignals(stockId: string) {
     return this.prisma.stockSignal.findMany({
@@ -86,10 +95,14 @@ export class AlphaService {
   }
 
   async getAnomalyBySymbol(symbol: string) {
-    const stock = await this.prisma.stock.findUnique({ where: { symbol: symbol.toUpperCase() } });
+    const stock = await this.prisma.stock.findUnique({
+      where: { symbol: symbol.toUpperCase() },
+    });
     if (!stock) return { symbol, anomalyScore: 0, signalType: 'NEUTRAL', earlyFlag: false };
+
     const signals = await this.getLatestSignals(stock.id);
     if (!signals.length) return { symbol, anomalyScore: 0, signalType: 'NEUTRAL', earlyFlag: false, signals: [] };
+
     const top = signals[0];
     return {
       symbol,
@@ -103,11 +116,15 @@ export class AlphaService {
   }
 
   /**
-   * getSignals(symbol) — used by ReportsService.
-   * Returns the same enriched anomaly object as getAnomalyBySymbol.
+   * getSignals(symbol) — returns recent valid signals for a symbol.
+   * Called by ReportsService.generateReport().
    */
   async getSignals(symbol: string) {
-    return this.getAnomalyBySymbol(symbol);
+    const stock = await this.prisma.stock.findUnique({
+      where: { symbol: symbol.toUpperCase() },
+    });
+    if (!stock) return [];
+    return this.getLatestSignals(stock.id);
   }
 
   /** Persist a new signal */
