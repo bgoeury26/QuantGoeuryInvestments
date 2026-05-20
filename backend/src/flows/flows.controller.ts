@@ -1,12 +1,16 @@
-import { Controller, Get, Param, UseGuards } from "@nestjs/common";
-import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
-import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
-import { FlowsService } from "./flows.service";
-@ApiTags("flows") @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller("flows")
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { FlowsService } from './flows.service';
+
+@ApiTags('flows')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('flows')
 export class FlowsController {
-  constructor(private f: FlowsService) {}
-  @Get(":s/institutional") inst(@Param("s") s: string) { return this.f.getInstitutionalHoldings(s); }
-  @Get(":s/insider") insider(@Param("s") s: string) { return this.f.getInsiderTrades(s); }
-  @Get(":s/political") political(@Param("s") s: string) { return this.f.getPoliticalTrades(s); }
-  @Get(":s/summary") summary(@Param("s") s: string) { return this.f.getFlowSummary(s); }
+  constructor(private flowsService: FlowsService) {}
+  @Get(':symbol/institutional') getInstitutional(@Param('symbol') s: string) { return this.flowsService.getInstitutionalHoldings(s); }
+  @Get(':symbol/insider') getInsider(@Param('symbol') s: string) { return this.flowsService.getInsiderTrades(s); }
+  @Get(':symbol/political') getPolitical(@Param('symbol') s: string) { return this.flowsService.getPoliticalTrades(s); }
+  @Get(':symbol/summary') getSummary(@Param('symbol') s: string) { return this.flowsService.getFlowSummary(s); }
 }

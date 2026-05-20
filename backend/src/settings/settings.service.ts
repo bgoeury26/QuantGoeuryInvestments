@@ -1,20 +1,38 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
-import { ConfigService } from "@nestjs/config";
-import * as CryptoJS from "crypto-js";
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class SettingsService {
-  private encKey: string;
+  private readonly key: Buffer;
+
   constructor(private prisma: PrismaService, private config: ConfigService) {
-    this.encKey = this.config.get("ENCRYPTION_KEY") || "default_dev_key_32chars_change!";
+    const rawKey = this.config.get('ENCRYPTION_KEY') || 'default_key_32chars_change_this!';
+    this.key = Buffer.from(rawKey.padEnd(32).slice(0, 32));
   }
 
-  private encrypt(val: string): string { return CryptoJS.AES.encrypt(val, this.encKey).toString(); }
-  private decrypt(val: string): string {
-    try { return CryptoJS.AES.decrypt(val, this.encKey).toString(CryptoJS.enc.Utf8); } catch { return ""; }
+  private encrypt(text: string): string {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-cbc', this.key, iv);
+    const encrypted = Buffer.concat([cipher.update(text), cipher.final()]);
+    return `${iv.toString('hex')}:${encrypted.toString('hex')}`;
   }
-  private mask(val: string): string { if (!val || val.length < 8) return "****"; return val.slice(0, 4) + "****" + val.slice(-4); }
+
+  private decrypt(text: string): string {
+    try {
+      const [ivHex, encHex] = text.split(':');
+      const iv = Buffer.from(ivHex, 'hex');
+      const enc = Buffer.from(encHex, 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-cbc', this.key, iv);
+      return Buffer.concat([decipher.update(enc), decipher.final()]).toString();
+    } catch { return ''; }
+  }
+
+  private mask(val: string): string {
+    if (!val || val.length < 8) return '***';
+    return val.slice(0, 4) + '*'.repeat(val.length - 8) + val.slice(-4);
+  }
 
   async getSettings(userId: string) {
     const s = await this.prisma.userSettings.findUnique({ where: { userId } });
@@ -35,17 +53,21 @@ export class SettingsService {
 
   async saveSettings(userId: string, dto: any) {
     const data: any = { gdeltEnabled: dto.gdeltEnabled ?? true };
-    const fields = ["fmpApiKey","finnhubApiKey","polygonApiKey","alphaVantageKey","newsApiKey","fredApiKey","redditClientId","redditClientSecret","blueskyPassword","congressApiKey"];
-    for (const f of fields) {
-      if (dto[f] && !dto[f].includes("****")) data[f] = this.encrypt(dto[f]);
-    }
+    if (dto.fmpApiKey) data.fmpApiKey = this.encrypt(dto.fmpApiKey);
+    if (dto.finnhubApiKey) data.finnhubApiKey = this.encrypt(dto.finnhubApiKey);
+    if (dto.polygonApiKey) data.polygonApiKey = this.encrypt(dto.polygonApiKey);
+    if (dto.alphaVantageKey) data.alphaVantageKey = this.encrypt(dto.alphaVantageKey);
+    if (dto.newsApiKey) data.newsApiKey = this.encrypt(dto.newsApiKey);
+    if (dto.fredApiKey) data.fredApiKey = this.encrypt(dto.fredApiKey);
+    if (dto.redditClientId) data.redditClientId = this.encrypt(dto.redditClientId);
+    if (dto.redditClientSecret) data.redditClientSecret = this.encrypt(dto.redditClientSecret);
     if (dto.blueskyIdentifier) data.blueskyIdentifier = dto.blueskyIdentifier;
-    return this.prisma.userSettings.upsert({ where: { userId }, update: data, create: { userId, ...data } });
-  }
-
-  async getDecryptedKey(userId: string, keyName: string): Promise<string | null> {
-    const s = await this.prisma.userSettings.findUnique({ where: { userId } });
-    if (!s || !s[keyName]) return null;
-    return this.decrypt(s[keyName]);
+    if (dto.blueskyPassword) data.blueskyPassword = this.encrypt(dto.blueskyPassword);
+    if (dto.congressApiKey) data.congressApiKey = this.encrypt(dto.congressApiKey);
+    return this.prisma.userSettings.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, ...data },
+    });
   }
 }

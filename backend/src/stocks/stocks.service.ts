@@ -1,20 +1,24 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
-import { CacheService } from "../cache/cache.service";
-import { ConfigService } from "@nestjs/config";
-import axios from "axios";
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
+import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 
 @Injectable()
 export class StocksService {
-  constructor(private prisma: PrismaService, private cache: CacheService, private config: ConfigService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: CacheService,
+    private config: ConfigService,
+  ) {}
 
   getAll() {
     return this.prisma.stock.findMany({
       include: {
-        scores: { orderBy: { computedAt: "desc" }, take: 1 },
-        signals: { where: { expiresAt: { gt: new Date() } }, orderBy: { detectedAt: "desc" }, take: 1 },
+        scores: { orderBy: { computedAt: 'desc' }, take: 1 },
+        signals: { where: { expiresAt: { gt: new Date() } }, orderBy: { detectedAt: 'desc' }, take: 1 },
       },
-      orderBy: { symbol: "asc" },
+      orderBy: { symbol: 'asc' },
     });
   }
 
@@ -22,8 +26,8 @@ export class StocksService {
     const stock = await this.prisma.stock.findUnique({
       where: { symbol: symbol.toUpperCase() },
       include: {
-        scores: { orderBy: { computedAt: "desc" }, take: 1 },
-        signals: { where: { expiresAt: { gt: new Date() } }, orderBy: { strength: "desc" }, take: 5 },
+        scores: { orderBy: { computedAt: 'desc' }, take: 1 },
+        signals: { where: { expiresAt: { gt: new Date() } }, orderBy: { strength: 'desc' }, take: 5 },
       },
     });
     if (!stock) throw new NotFoundException(`Stock ${symbol} not found`);
@@ -31,87 +35,91 @@ export class StocksService {
   }
 
   async getQuote(symbol: string) {
-    const cached = await this.cache.get("quote", { symbol });
+    const cached = await this.cache.get('quote', { symbol });
     if (cached) return cached;
-    const key = this.config.get("FINNHUB_API_KEY");
-    if (!key) return null;
+    const apiKey = this.config.get('FINNHUB_API_KEY');
+    if (!apiKey) return null;
     try {
-      const { data } = await axios.get(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${key}`);
-      await this.cache.set("quote", { symbol }, data, 300);
+      const { data } = await axios.get(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`);
+      await this.cache.set('quote', { symbol }, data, 300);
       return data;
     } catch { return null; }
   }
 
   async getFundamentals(symbol: string) {
-    const cached = await this.cache.get("fundamentals", { symbol });
+    const cached = await this.cache.get('fundamentals', { symbol });
     if (cached) return cached;
-    const key = this.config.get("FMP_API_KEY");
-    if (!key) return null;
+    const apiKey = this.config.get('FMP_API_KEY');
+    if (!apiKey) return null;
     try {
       const [profile, ratios, growth] = await Promise.all([
-        axios.get(`https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${key}`),
-        axios.get(`https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${key}`),
-        axios.get(`https://financialmodelingprep.com/api/v3/financial-growth/${symbol}?limit=1&apikey=${key}`),
+        axios.get(`https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${apiKey}`),
+        axios.get(`https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${apiKey}`),
+        axios.get(`https://financialmodelingprep.com/api/v3/financial-growth/${symbol}?limit=1&apikey=${apiKey}`),
       ]);
       const result = { profile: profile.data?.[0], ratios: ratios.data?.[0], growth: growth.data?.[0] };
-      await this.cache.set("fundamentals", { symbol }, result, 86400);
+      await this.cache.set('fundamentals', { symbol }, result, 86400);
       return result;
     } catch { return null; }
   }
 
   async getTechnicals(symbol: string) {
-    const cached = await this.cache.get("technicals", { symbol });
+    const cached = await this.cache.get('technicals', { symbol });
     if (cached) return cached;
-    const key = this.config.get("ALPHA_VANTAGE_API_KEY");
-    if (!key) return null;
+    const apiKey = this.config.get('ALPHA_VANTAGE_API_KEY');
+    if (!apiKey) return null;
     try {
       const [rsi, macd] = await Promise.all([
-        axios.get(`https://www.alphavantage.co/query?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${key}`),
-        axios.get(`https://www.alphavantage.co/query?function=MACD&symbol=${symbol}&interval=daily&series_type=close&apikey=${key}`),
+        axios.get(`https://www.alphavantage.co/query?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${apiKey}`),
+        axios.get(`https://www.alphavantage.co/query?function=MACD&symbol=${symbol}&interval=daily&series_type=close&apikey=${apiKey}`),
       ]);
-      const result = { rsi: rsi.data?.["Technical Analysis: RSI"], macd: macd.data?.["Technical Analysis: MACD"] };
-      await this.cache.set("technicals", { symbol }, result, 3600);
+      const result = { rsi: rsi.data?.['Technical Analysis: RSI'], macd: macd.data?.['Technical Analysis: MACD'] };
+      await this.cache.set('technicals', { symbol }, result, 3600);
       return result;
     } catch { return null; }
   }
 
   async getAnalystRatings(symbol: string) {
-    const cached = await this.cache.get("analyst", { symbol });
+    const cached = await this.cache.get('analyst', { symbol });
     if (cached) return cached;
-    const key = this.config.get("FINNHUB_API_KEY");
-    if (!key) return null;
+    const apiKey = this.config.get('FINNHUB_API_KEY');
+    if (!apiKey) return null;
     try {
       const [rec, target] = await Promise.all([
-        axios.get(`https://finnhub.io/api/v1/stock/recommendation?symbol=${symbol}&token=${key}`),
-        axios.get(`https://finnhub.io/api/v1/stock/price-target?symbol=${symbol}&token=${key}`),
+        axios.get(`https://finnhub.io/api/v1/stock/recommendation?symbol=${symbol}&token=${apiKey}`),
+        axios.get(`https://finnhub.io/api/v1/stock/price-target?symbol=${symbol}&token=${apiKey}`),
       ]);
       const result = { recommendations: rec.data?.slice(0, 4), priceTarget: target.data };
-      await this.cache.set("analyst", { symbol }, result, 21600);
+      await this.cache.set('analyst', { symbol }, result, 21600);
       return result;
     } catch { return null; }
   }
 
   async getHistoricalPrices(symbol: string, days = 200) {
-    const cached = await this.cache.get("historical", { symbol, days });
+    const cached = await this.cache.get('historical', { symbol, days });
     if (cached) return cached;
-    const key = this.config.get("FMP_API_KEY");
-    if (!key) return [];
+    const apiKey = this.config.get('FMP_API_KEY');
+    if (!apiKey) return [];
     try {
-      const { data } = await axios.get(`https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=${days}&apikey=${key}`);
+      const { data } = await axios.get(`https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=${days}&apikey=${apiKey}`);
       const prices = data?.historical || [];
-      await this.cache.set("historical", { symbol, days }, prices, 3600);
+      await this.cache.set('historical', { symbol, days }, prices, 3600);
       return prices;
     } catch { return []; }
   }
 
   searchStocks(query: string) {
     return this.prisma.stock.findMany({
-      where: { OR: [{ symbol: { contains: query.toUpperCase() } }, { name: { contains: query, mode: "insensitive" } }] },
+      where: { OR: [{ symbol: { contains: query.toUpperCase() } }, { name: { contains: query, mode: 'insensitive' } }] },
       take: 20,
     });
   }
 
   upsertStock(symbol: string, data: any) {
-    return this.prisma.stock.upsert({ where: { symbol }, update: data, create: { symbol, name: data.name || symbol, ...data } });
+    return this.prisma.stock.upsert({
+      where: { symbol },
+      update: data,
+      create: { symbol, name: data.name || symbol, ...data },
+    });
   }
 }
