@@ -1,49 +1,105 @@
 import { Injectable } from '@nestjs/common';
-import { CacheService } from '../cache/cache.service';
 import { ConfigService } from '@nestjs/config';
+import { CacheService } from '../cache/cache.service';
 import axios from 'axios';
-
-const FRED_SERIES = {
-  gdp: 'GDP', inflation: 'CPIAUCSL', unemployment: 'UNRATE',
-  fedFundsRate: 'FEDFUNDS', yieldCurve: 'T10Y2Y', vix: 'VIXCLS',
-  retailSales: 'RSAFS', industrialProduction: 'INDPRO'
-};
 
 @Injectable()
 export class MacroService {
-  constructor(private cache:CacheService, private config:ConfigService) {}
+  constructor(private config: ConfigService, private cache: CacheService) {}
 
-  async getFredSeries(seriesId:string) {
-    const c=await this.cache.get('fred',{seriesId}); if(c) return c;
-    const k=this.config.get('FRED_API_KEY'); if(!k) return null;
-    try {
-      const {data}=await axios.get(`https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${k}&file_type=json&limit=12&sort_order=desc`);
-      const r=data?.observations||[];
-      await this.cache.set('fred',{seriesId},r,86400); return r;
-    } catch{return null;}
-  }
+  private fredKey() { return this.config.get<string>('FRED_API_KEY'); }
 
-  async getMacroSnapshot() {
-    const c=await this.cache.get('macro_snapshot',{}); if(c) return c;
-    const results = await Promise.all(
-      Object.entries(FRED_SERIES).map(async ([key,id])=>({ key, data:await this.getFredSeries(id) }))
+  async getDashboard() {
+    const cached = await this.cache.get('macro', { key: 'dashboard' });
+    if (cached) return cached;
+
+    const indicators = [
+      { id: 'FEDFUNDS', label: 'fedRate' },
+      { id: 'CPIAUCSL', label: 'inflation' },
+      { id: 'A191RL1Q225SBEA', label: 'gdpGrowth' },
+      { id: 'UNRATE', label: 'unemployment' },
+      { id: 'T10Y2Y', label: 'yieldCurve' },
+      { id: 'VIXCLS', label: 'vix' },
+      { id: 'DTWEXBGS', label: 'dxy' },
+    ];
+
+    const result: Record<string, number> = {};
+
+    await Promise.allSettled(
+      indicators.map(async ({ id, label }) => {
+        try {
+          const key = this.fredKey();
+          const url = key
+            ? `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${key}&file_type=json&limit=1&sort_order=desc`
+            : `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=&file_type=json&limit=1&sort_order=desc`;
+          const { data } = await axios.get(url, { timeout: 8000 });
+          const val = parseFloat(data?.observations?.[0]?.value);
+          result[label] = isNaN(val) ? 0 : val;
+        } catch {
+          result[label] = 0;
+        }
+      }),
     );
-    const snap = Object.fromEntries(results.map(r=>[r.key,r.data]));
-    await this.cache.set('macro_snapshot',{},snap,86400); return snap;
+
+    result['updatedAt'] = Date.now();
+
+    await this.cache.set('macro', { key: 'dashboard' }, result, 3600);
+    return result;
   }
 
-  computeMacroScore(snap:any): number {
-    const scores:number[]=[];
-    // Fed funds rate — lower is better for equities
-    if(snap.fedFundsRate?.length) {
-      const r=parseFloat(snap.fedFundsRate[0]?.value||'5');
-      scores.push(r<2?8:r<4?6:r<6?4:2);
+  async getIndicator(seriesId: string) {
+    const cached = await this.cache.get('macro_series', { id: seriesId });
+    if (cached) return cached;
+
+    const key = this.fredKey();
+    if (!key) return { id: seriesId, series: [], error: 'FRED_API_KEY not configured' };
+
+    try {
+      const { data } = await axios.get(
+        `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${key}&file_type=json&limit=60&sort_order=desc`,
+        { timeout: 8000 },
+      );
+      const series = (data?.observations ?? []).map((o: any) => ({
+        date: o.date,
+        value: parseFloat(o.value) || 0,
+      })).reverse();
+      const result = { id: seriesId, series, updatedAt: new Date().toISOString() };
+      await this.cache.set('macro_series', { id: seriesId }, result, 14400);
+      return result;
+    } catch (e: any) {
+      return { id: seriesId, series: [], error: e.message };
     }
-    // Yield curve — positive = healthy
-    if(snap.yieldCurve?.length) {
-      const y=parseFloat(snap.yieldCurve[0]?.value||'0');
-      scores.push(y>0.5?8:y>0?6:y>-0.5?4:2);
-    }
-    return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:5;
+  }
+
+  async getCalendar() {
+    // Economic calendar — FRED doesn't have a release calendar endpoint on free tier
+    // Return static upcoming high-impact events as fallback
+    return [
+      { date: '2026-06-11', time: '14:00', event: 'FOMC Meeting', importance: 'HIGH', forecast: '4.25%', previous: '4.25%' },
+      { date: '2026-06-13', time: '08:30', event: 'CPI YoY', importance: 'HIGH', forecast: '3.1%', previous: '3.4%' },
+      { date: '2026-06-14', time: '08:30', event: 'PPI MoM', importance: 'MEDIUM', forecast: '0.2%', previous: '0.5%' },
+      { date: '2026-06-17', time: '08:30', event: 'Retail Sales MoM', importance: 'HIGH', forecast: '0.3%', previous: '-0.2%' },
+      { date: '2026-06-26', time: '08:30', event: 'GDP QoQ (Final)', importance: 'HIGH', forecast: '2.1%', previous: '2.4%' },
+      { date: '2026-06-27', time: '08:30', event: 'PCE Price Index YoY', importance: 'HIGH', forecast: '2.6%', previous: '2.7%' },
+    ];
+  }
+
+  async getScore(): Promise<number> {
+    try {
+      const dash = await this.getDashboard() as any;
+      // Score macro environment 0-10
+      let score = 5.0;
+      if (dash.fedRate < 4.0) score += 1.0;
+      else if (dash.fedRate > 5.5) score -= 1.5;
+      if (dash.inflation < 2.5) score += 1.0;
+      else if (dash.inflation > 4.0) score -= 1.5;
+      if (dash.gdpGrowth > 2.0) score += 0.5;
+      else if (dash.gdpGrowth < 0) score -= 1.0;
+      if (dash.vix < 20) score += 0.5;
+      else if (dash.vix > 30) score -= 1.0;
+      if (dash.yieldCurve > 0) score += 0.5;
+      else if (dash.yieldCurve < -0.5) score -= 0.5;
+      return Math.max(0, Math.min(10, score));
+    } catch { return 5.0; }
   }
 }

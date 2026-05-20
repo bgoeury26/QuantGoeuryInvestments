@@ -1,18 +1,33 @@
-FROM node:20-alpine AS builder
+# ---- Base ----
+FROM node:20-alpine AS base
 WORKDIR /app
 COPY package*.json ./
+
+# ---- Dependencies ----
+FROM base AS deps
+RUN npm ci --only=production
+
+# ---- Build ----
+FROM base AS build
 RUN npm ci
 COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:20-alpine AS runner
+# ---- Development ----
+FROM base AS development
+RUN npm ci
+COPY . .
+RUN npx prisma generate
+CMD ["npm", "run", "start:dev"]
+
+# ---- Production ----
+FROM node:20-alpine AS production
 WORKDIR /app
-RUN apk add --no-cache chromium
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/prisma ./prisma
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/prisma ./prisma
+COPY package*.json ./
 EXPOSE 3001
-CMD ["node", "dist/main"]
+CMD ["node", "dist/main.js"]

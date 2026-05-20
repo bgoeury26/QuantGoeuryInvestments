@@ -1,5 +1,12 @@
 import { Module } from '@nestjs/common';
-import { SentimentService } from './sentiment.service';
 import { SentimentController } from './sentiment.controller';
-@Module({ controllers:[SentimentController], providers:[SentimentService], exports:[SentimentService] })
+import { SentimentService } from './sentiment.service';
+import { CacheModule } from '../cache/cache.module';
+
+@Module({
+  imports: [CacheModule],
+  controllers: [SentimentController],
+  providers: [SentimentService],
+  exports: [SentimentService],
+})
 export class SentimentModule {}

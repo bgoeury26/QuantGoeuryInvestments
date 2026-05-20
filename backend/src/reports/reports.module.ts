@@ -1,7 +1,14 @@
 import { Module } from '@nestjs/common';
-import { ReportsService } from './reports.service';
 import { ReportsController } from './reports.controller';
-import { StocksModule } from '../stocks/stocks.module';
+import { ReportsService } from './reports.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { ScoringModule } from '../scoring/scoring.module';
-@Module({ imports:[StocksModule,ScoringModule], controllers:[ReportsController], providers:[ReportsService] })
+import { AlphaModule } from '../alpha/alpha.module';
+import { AiModule } from '../ai/ai.module';
+
+@Module({
+  imports: [ScoringModule, AlphaModule, AiModule],
+  controllers: [ReportsController],
+  providers: [ReportsService, PrismaService],
+})
 export class ReportsModule {}

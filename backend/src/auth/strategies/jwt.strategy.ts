@@ -7,11 +7,17 @@ import { UsersService } from '../../users/users.service';
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(config: ConfigService, private users: UsersService) {
-    super({ jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), secretOrKey: config.get('JWT_SECRET') });
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: config.get<string>('JWT_SECRET') || 'fallback-dev-secret-change-me',
+    });
   }
-  async validate(payload: any) {
+
+  async validate(payload: { sub: string; email: string; role: string }) {
     const user = await this.users.findById(payload.sub);
-    if (!user || user.status !== 'APPROVED') throw new UnauthorizedException();
-    return user;
+    if (!user) throw new UnauthorizedException();
+    if (user.status !== 'APPROVED') throw new UnauthorizedException('Account not approved');
+    return { sub: payload.sub, email: payload.email, role: payload.role };
   }
 }
