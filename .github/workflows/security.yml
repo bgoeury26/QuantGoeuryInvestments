@@ -1,0 +1,28 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday 06:00 UTC
+  push:
+    branches: [main]
+
+jobs:
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit backend deps
+        run: cd backend && npm audit --audit-level=high || true
+
+      - name: Audit frontend deps
+        run: cd frontend && npm audit --audit-level=high || true
+
+      - name: Check for secrets in diff
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: HEAD~1
+          head: HEAD
+        continue-on-error: true

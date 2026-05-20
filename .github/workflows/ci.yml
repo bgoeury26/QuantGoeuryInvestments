@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─────────────────────────────────────────
+  # BACKEND: TypeScript + Tests + Lint
+  # ─────────────────────────────────────────
+  backend:
+    name: Backend — TypeCheck / Test / Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline || npm install
+
+      - name: Generate Prisma client (mock)
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+      - name: TypeScript compile check
+        run: npx tsc --noEmit
+
+      - name: Run unit tests
+        run: npm test -- --passWithNoTests --forceExit --testPathPattern="spec"
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          JWT_SECRET: ci-test-secret-not-real
+
+      - name: Lint
+        run: npm run lint || true
+
+  # ─────────────────────────────────────────
+  # FRONTEND: TypeScript + Build check
+  # ─────────────────────────────────────────
+  frontend:
+    name: Frontend — TypeCheck / Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline || npm install
+
+      - name: TypeScript compile check
+        run: npx tsc --noEmit
+
+      - name: Next.js build check
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+          SKIP_ENV_VALIDATION: true
+
+  # ─────────────────────────────────────────
+  # DOCKER: Validate compose syntax
+  # ─────────────────────────────────────────
+  docker:
+    name: Docker — Compose Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
