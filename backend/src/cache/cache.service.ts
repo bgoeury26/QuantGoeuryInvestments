@@ -12,30 +12,27 @@ export class CacheService {
 
   async get<T>(endpoint: string, params: Record<string, any> = {}): Promise<T | null> {
     const key = this.buildKey(endpoint, params);
-    try {
-      const cached = await this.prisma.apiCache.findUnique({ where: { cacheKey: key } });
-      if (!cached) return null;
-      if (cached.expiresAt < new Date()) {
-        await this.prisma.apiCache.delete({ where: { cacheKey: key } });
-        return null;
-      }
-      return cached.data as T;
-    } catch { return null; }
+    const cached = await this.prisma.apiCache.findUnique({ where: { cacheKey: key } });
+    if (!cached) return null;
+    if (cached.expiresAt < new Date()) {
+      await this.prisma.apiCache.delete({ where: { cacheKey: key } }).catch(() => {});
+      return null;
+    }
+    return cached.data as T;
   }
 
   async set(endpoint: string, params: Record<string, any> = {}, data: any, ttlSeconds = 3600): Promise<void> {
     const key = this.buildKey(endpoint, params);
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
-    try {
-      await this.prisma.apiCache.upsert({
-        where: { cacheKey: key },
-        update: { data, expiresAt },
-        create: { cacheKey: key, data, endpoint, symbol: params.symbol || null, expiresAt },
-      });
-    } catch {}
+    await this.prisma.apiCache.upsert({
+      where: { cacheKey: key },
+      update: { data, expiresAt },
+      create: { cacheKey: key, data, endpoint, symbol: params.symbol || null, expiresAt },
+    });
   }
 
-  async cleanup(): Promise<void> {
-    await this.prisma.apiCache.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  async cleanup(): Promise<number> {
+    const result = await this.prisma.apiCache.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+    return result.count;
   }
 }
