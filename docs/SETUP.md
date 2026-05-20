@@ -1,150 +1,196 @@
-# Setup Guide — QuantGoeuryInvestments
+# QuantGoeuryInvestments — Setup Guide
+
+## Quick Start (5 minutes)
+
+```bash
+git clone https://github.com/bgoeury26/QuantGoeuryInvestments.git
+cd QuantGoeuryInvestments
+bash scripts/setup.sh
+```
+
+Then start the dev servers:
+
+```bash
+# Terminal 1 — Backend (NestJS)
+cd backend && npm run start:dev
+
+# Terminal 2 — Frontend (Next.js)
+cd frontend && npm run dev
+```
+
+Open http://localhost:3000
+
+---
 
 ## Prerequisites
 
-- Node.js 20+
-- Docker + Docker Compose
-- Git
+| Tool | Min version | Install |
+|------|------------|----------|
+| Node.js | 18+ | https://nodejs.org |
+| npm | 9+ | Bundled with Node |
+| Docker | 24+ | https://docker.com |
+| Docker Compose | 2.2+ | Bundled with Docker Desktop |
 
 ---
 
-## Quick Start (Docker — Recommended)
+## Environment Variables
 
+### Backend `.env`
+
+Copy and edit:
 ```bash
-# 1. Clone
-git clone https://github.com/bgoeury26/QuantGoeuryInvestments.git
-cd QuantGoeuryInvestments
-
-# 2. Configure environment
 cp .env.example .env
-# Edit .env and fill in your API keys (see docs/API_KEYS.md)
-
-# 3. Start everything
-docker-compose up -d
-
-# 4. Run DB migrations + seed
-docker-compose exec backend npx prisma migrate dev
-docker-compose exec backend npx prisma db seed
-
-# 5. Open the app
-open http://localhost:3000
 ```
 
-The seed creates the admin account `goeurybenjamin@gmail.com` with password `admin123` — **change it immediately**.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `JWT_SECRET` | ✅ | Random 32+ char secret |
+| `ADMIN_EMAIL` | ✅ | Email of the approved admin account |
+| `ENCRYPTION_KEY` | ✅ | 64-char hex for AES-256 API key encryption |
+| `FMP_API_KEY` | Recommended | Financial Modeling Prep (250 free/day) |
+| `FINNHUB_API_KEY` | Recommended | Finnhub (60 free/min) |
+| `ALPHA_VANTAGE_API_KEY` | Optional | Alpha Vantage (25 free/day) |
+| `NEWS_API_KEY` | Optional | NewsAPI (100 free/day) |
+| `FRED_API_KEY` | Optional | FRED macro data (unlimited free) |
+| `REDDIT_CLIENT_ID` | Optional | Reddit sentiment |
+| `BLUESKY_IDENTIFIER` | Optional | Bluesky sentiment |
+| `CONGRESS_API_KEY` | Optional | Congress.gov political trades |
+| `OPENAI_API_KEY` | Optional | AI analysis (falls back to rule-based) |
+
+Generate `ENCRYPTION_KEY`:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Generate `JWT_SECRET`:
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+```
+
+### Frontend `.env.local`
+
+```bash
+cp frontend/.env.local.example frontend/.env.local
+```
+
+Only `NEXT_PUBLIC_API_URL` needs updating if your backend runs on a non-default port.
 
 ---
 
-## Manual Setup (Development)
+## Database Setup
 
-### 1. Database
+### Option A — Docker (recommended)
 
 ```bash
-# Start PostgreSQL locally or use a free Supabase/Neon instance
-# Update DATABASE_URL in .env
+docker-compose -f docker-compose.dev.yml up -d db
 ```
 
-### 2. Backend
+This starts PostgreSQL on port 5432 with:
+- Database: `quant_db`
+- User: `quant_user`
+- Password: `quant_password`
+
+### Option B — Local PostgreSQL
+
+Create the database manually:
+```sql
+CREATE USER quant_user WITH PASSWORD 'quant_password';
+CREATE DATABASE quant_db OWNER quant_user;
+```
+
+Then update `DATABASE_URL` in `.env`.
+
+### Migrations + Seed
 
 ```bash
 cd backend
-npm install
-
-# Run migrations
-npx prisma migrate dev
-npx prisma generate
-npx prisma db seed
-
-# Start dev server
-npm run start:dev
-# API available at http://localhost:3001
-# Swagger docs at http://localhost:3001/api
+npx prisma migrate deploy   # apply all migrations
+npx prisma generate         # generate Prisma client
+npx ts-node prisma/seed.ts  # seed admin user + 25 stocks
 ```
 
-### 3. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-# App available at http://localhost:3000
-```
+The seed creates:
+- Admin user at `ADMIN_EMAIL` with password `ChangeMe123!` (**change immediately**)
+- 25-stock universe (AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, JPM...)
+- Demo scores and signals so the dashboard is non-empty on first boot
 
 ---
 
-## API Keys Required
+## Docker (Production)
 
-Minimum required keys for core functionality:
+```bash
+docker-compose up --build
+```
 
-| Key | Where to get | Free tier |
-|---|---|---|
-| `FMP_API_KEY` | https://financialmodelingprep.com | 250 calls/day |
-| `FINNHUB_API_KEY` | https://finnhub.io | 60 calls/min |
-| `FRED_API_KEY` | https://fred.stlouisfed.org | Unlimited |
-
-Optional (enhances signals):
-
-| Key | Where to get |
-|---|---|
-| `POLYGON_API_KEY` | https://polygon.io |
-| `ALPHA_VANTAGE_API_KEY` | https://alphavantage.co |
-| `NEWS_API_KEY` | https://newsapi.org |
-| `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` | https://www.reddit.com/prefs/apps |
-| `BLUESKY_IDENTIFIER` + `BLUESKY_PASSWORD` | https://bsky.app |
-| `CONGRESS_API_KEY` | https://api.congress.gov |
+Services:
+- `db` — PostgreSQL 15
+- `backend` — NestJS on port 3001
+- `frontend` — Next.js on port 3000
 
 ---
 
 ## First Login
 
-1. Navigate to `http://localhost:3000/login`
-2. Log in with `goeurybenjamin@gmail.com` / `admin123`
-3. Go to **Settings** and enter your API keys
-4. Register additional users from the login page — they will be `PENDING`
-5. Approve them from the **Admin Panel** (`/admin`)
+1. Go to http://localhost:3000/register
+2. Create an account — it will be `PENDING`
+3. Log in as admin at http://localhost:3000/login with `ADMIN_EMAIL` / `ChangeMe123!`
+4. Navigate to **Admin Panel** → approve the new user
+5. The user can now log in and access the platform
 
 ---
 
-## Running the Scoring Engine
+## API Keys — Where to Get Them (All Free)
 
-The scoring engine runs automatically via the NestJS scheduler (every 4 hours). To trigger manually:
+| Provider | Free tier | Get key |
+|----------|-----------|----------|
+| FMP | 250 calls/day | https://financialmodelingprep.com/developer/docs |
+| Finnhub | 60 calls/min | https://finnhub.io/register |
+| Alpha Vantage | 25 calls/day | https://alphavantage.co/support/#api-key |
+| NewsAPI | 100 calls/day | https://newsapi.org/register |
+| FRED | Unlimited | https://fred.stlouisfed.org/docs/api/api_key.html |
+| Congress.gov | Unlimited | https://api.congress.gov/sign-up |
+| Reddit | Unlimited | https://www.reddit.com/prefs/apps |
+| Bluesky | Unlimited | https://bsky.app (use account credentials) |
+| GDELT | Unlimited | No key needed — toggle in Settings |
+
+All keys are saved encrypted (AES-256-CBC) through the **Settings** page in the UI.
+
+---
+
+## Smoke Test
+
+After setup, verify all endpoints:
 
 ```bash
-# From backend directory
-curl -X POST http://localhost:3001/scoring/run \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+bash scripts/smoke-test.sh
+# Or against a remote host:
+bash scripts/smoke-test.sh https://your-domain.com
 ```
 
-Or uncomment the cron trigger in `backend/src/scoring/scoring.scheduler.ts`.
+Expected output: `All checks passed ✅`
 
 ---
 
-## Production Deployment
+## Cost Estimate
 
-### Recommended: Railway.app (Free tier available)
-
-```bash
-# Install Railway CLI
-npm install -g @railway/cli
-railway login
-railway init
-railway up
-```
-
-Set all `.env` variables in Railway dashboard. Add a PostgreSQL plugin from the Railway marketplace.
-
-### Alternative: Render.com
-
-- Web Service (backend) + Static Site (frontend) + PostgreSQL — all on free tier
-- Total cost: €0/month
+| Service | Cost |
+|---------|------|
+| PostgreSQL (self-hosted / Supabase free) | €0 |
+| Backend (Fly.io free / VPS €5) | €0–€5 |
+| Frontend (Vercel free) | €0 |
+| All APIs | €0 (free tiers) |
+| OpenAI GPT-4o-mini (optional) | ~€0–€5/mo |
+| **Total** | **€0–€10/mo** |
 
 ---
 
-## Estimated Monthly Cost
+## Troubleshooting
 
-| Component | Provider | Cost |
-|---|---|---|
-| Frontend hosting | Vercel / Render | €0 |
-| Backend hosting | Render / Railway | €0–5 |
-| Database | Neon / Supabase | €0 |
-| All APIs | Free tiers | €0 |
-| **Total** | | **€0–5/month** |
+**Prisma migration error**: Run `npx prisma migrate reset` in `/backend` to wipe and re-apply.
+
+**Port conflict**: Change `PORT=3001` in `.env` and `NEXT_PUBLIC_API_URL` in `frontend/.env.local`.
+
+**Docker not starting**: Run `docker-compose down -v` then `docker-compose up --build`.
+
+**"Account pending approval"**: Log in as admin and approve the user in the Admin Panel.

@@ -1,66 +1,88 @@
 # Database — QuantGoeuryInvestments
 
-## Engine
+## Stack
 
-PostgreSQL 15+ via Prisma ORM.
+- **PostgreSQL 15** — primary datastore
+- **Prisma ORM** — type-safe queries, migrations, seed
+- **Schema location**: `backend/prisma/schema.prisma`
+- **Migrations**: `backend/prisma/migrations/`
 
-## Connection
+---
 
-Set `DATABASE_URL` in your `.env` file:
+## Models
 
-```
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/quant_db
-```
+| Model | Description |
+|-------|-------------|
+| `User` | Auth accounts — status: PENDING / APPROVED / REJECTED / SUSPENDED |
+| `UserSettings` | Encrypted API keys per user |
+| `Stock` | Ticker universe (25 stocks seeded) |
+| `StockScore` | Computed composite scores (time-series) |
+| `StockSignal` | Alpha engine signals (TTL-based) |
+| `Watchlist` | User ↔ Stock many-to-many |
+| `Report` | Generated research reports (with optional PDF path) |
 
-## Migrations
+---
+
+## Common Commands
 
 ```bash
-# From backend/
-npx prisma migrate dev     # Run pending migrations
-npx prisma migrate deploy  # Production deploy
-npx prisma studio          # Visual DB browser
+cd backend
+
+# Apply all pending migrations
+npx prisma migrate deploy
+
+# Create a new migration (dev)
+npx prisma migrate dev --name describe_change
+
+# Reset DB (wipe + re-migrate + re-seed)
+npx prisma migrate reset
+
+# Open Prisma Studio (visual DB browser)
+npx prisma studio
+
+# Seed (admin user + 25 stocks + demo scores)
+npx ts-node prisma/seed.ts
+
+# Generate Prisma client after schema changes
+npx prisma generate
 ```
 
-## Schema Summary
+---
 
-| Model | Purpose |
-|---|---|
-| `User` | Auth, roles (USER/ADMIN), approval status |
-| `UserApiSettings` | AES-256-CBC encrypted API keys per user |
-| `Stock` | Ticker master list with metadata |
-| `StockScore` | V2 scoring engine results (all 7 components) |
-| `StockSignal` | Alpha engine signals with TTL |
-| `InsiderTrade` | Form 4 SEC filings |
-| `InstitutionalFlow` | 13F quarterly holdings |
-| `PoliticalSignal` | FEC/Congress STOCK Act disclosures |
-| `SentimentData` | Reddit/Bluesky/NewsAPI/GDELT aggregated scores |
-| `MacroIndicator` | FRED time-series snapshots |
-| `WatchlistItem` | User watchlists (many-to-many User↔Stock) |
-| `Report` | Generated PDF reports with metadata |
+## Indexes
 
-## Seed Data
+Key indexes defined in `schema.prisma`:
 
-The seed script (`backend/prisma/seed.ts`) creates:
-- Admin user: `goeurybenjamin@gmail.com`
-- 20 default watchlist stocks (AAPL, NVDA, MSFT, TSLA, META, etc.)
+- `Stock.symbol` — unique, used in all lookups
+- `User.email` — unique, auth lookup
+- `StockScore.stockId + computedAt` — for latest score queries
+- `StockSignal.stockId + expiresAt` — for active signal queries
+- `Watchlist.userId + stockId` — unique composite
 
-Run with: `npx prisma db seed`
+---
 
-## Backup (Production)
+## Encryption
+
+All API keys stored in `UserSettings` are encrypted at the application layer with **AES-256-CBC** before being written to the database. The `ENCRYPTION_KEY` environment variable (64-char hex) is the master key. Never store it in the database.
+
+---
+
+## Backup
 
 ```bash
 # Dump
-pg_dump $DATABASE_URL > backup-$(date +%Y%m%d).sql
+pg_dump -U quant_user quant_db > backup.sql
 
 # Restore
-psql $DATABASE_URL < backup-20260520.sql
+psql -U quant_user quant_db < backup.sql
 ```
 
-## Free Hosting Options
+---
 
-| Provider | Free Tier | Notes |
-|---|---|---|
-| Neon.tech | 512 MB | Serverless, auto-pause |
-| Supabase | 500 MB | Includes auth + storage |
-| Railway | 1 GB | 5 USD/month after free tier |
-| Render | 1 GB | 90-day free trial |
+## Connection String Format
+
+```
+postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public
+```
+
+Default dev: `postgresql://quant_user:quant_password@localhost:5432/quant_db`

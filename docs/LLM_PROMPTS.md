@@ -1,124 +1,88 @@
-# LLM Prompts — QuantGoeuryInvestments
+# QuantGoeuryInvestments — LLM Prompts Reference
 
-These are the structured prompts used by the AI Analysis Engine for multi-agent stock analysis.
-
----
-
-## System Prompt (All Agents)
-
-```
-You are a quantitative analyst at a hedge fund. You have access to structured financial data for a stock.
-You must reason solely from the data provided. Do not fabricate numbers.
-Be precise, logical, and concise. Output must be valid JSON.
-```
+This file documents all AI prompts used in the platform. These run via `AiService` against OpenAI GPT-4o-mini (or fall back to rule-based analysis).
 
 ---
 
-## Bullish Analyst Prompt
+## Multi-Agent Stock Analysis
+
+Three analyst perspectives are generated in parallel for every stock analysis request.
+
+### Bullish Analyst Prompt
 
 ```
-You are a BULLISH analyst. Your job is to make the strongest possible bull case for this stock.
-Based on the data below, identify: catalysts, growth drivers, valuation upside, technical strength.
-Be logical — acknowledge risks but explain why the bull case outweighs them.
+You are a bullish equity analyst. Given this data about {symbol}:
+- Score: {finalScore}/10, Anomaly: {anomalyScore}/10
+- Fundamental: {fundamental}, Technical: {technical}, Sentiment: {sentiment}
+- Signal: {signalType}, Drivers: {drivers}
 
-Data:
-{data}
-
-Respond in JSON:
-{
-  "recommendation": "string (e.g. Strong Buy)",
-  "confidence": 0.0-1.0,
-  "rationale": "2-3 sentence summary",
-  "keyPoints": ["point1", "point2", "point3"],
-  "outlook": "string (6-month probabilistic outlook)"
-}
+Write a concise 3-sentence bullish case. Be specific. 
+End with a Buy recommendation and price target rationale.
 ```
+
+**Expected output**: 3 sentences + "Recommendation: BUY"
 
 ---
 
-## Bearish Analyst Prompt
+### Bearish Analyst Prompt
 
 ```
-You are a BEARISH analyst. Your job is to make the strongest possible bear case for this stock.
-Based on the data below, identify: risks, valuation concerns, technical weakness, macro headwinds.
-Be logical — acknowledge strengths but explain why the bear case dominates.
+You are a bearish equity analyst. Given this data about {symbol}:
+- Score: {finalScore}/10, Anomaly: {anomalyScore}/10
+- Fundamental: {fundamental}, Technical: {technical}, Sentiment: {sentiment}
+- Signal: {signalType}, Drivers: {drivers}
 
-Data:
-{data}
-
-Respond in JSON:
-{
-  "recommendation": "string (e.g. Sell)",
-  "confidence": 0.0-1.0,
-  "rationale": "2-3 sentence summary",
-  "keyPoints": ["point1", "point2", "point3"],
-  "outlook": "string (6-month probabilistic outlook)"
-}
+Write a concise 3-sentence bearish case. Highlight risks and contradictions.
+End with a Sell/Reduce recommendation.
 ```
+
+**Expected output**: 3 sentences + "Recommendation: SELL" or "REDUCE"
 
 ---
 
-## Neutral Analyst Prompt
+### Neutral Analyst Prompt
 
 ```
-You are a NEUTRAL analyst. Your job is to give a balanced, data-driven assessment of this stock.
-Weigh both the bull and bear cases. Identify where data is contradictory or insufficient.
-Highlight the single most important variable that will determine direction.
+You are a neutral equity analyst. Given this data about {symbol}:
+- Score: {finalScore}/10, Anomaly: {anomalyScore}/10
+- Fundamental: {fundamental}, Technical: {technical}, Sentiment: {sentiment}
+- Signal: {signalType}
 
-Data:
-{data}
-
-Respond in JSON:
-{
-  "recommendation": "string (e.g. Hold)",
-  "confidence": 0.0-1.0,
-  "rationale": "2-3 sentence summary",
-  "keyPoints": ["point1", "point2", "point3"],
-  "outlook": "string (6-month probabilistic outlook)"
-}
+Write a balanced 3-sentence assessment. Weigh both sides.
+End with a Hold recommendation and key catalysts to watch.
 ```
+
+**Expected output**: 3 sentences + "Recommendation: HOLD"
 
 ---
 
-## Synthesis Prompt
+## Rule-Based Fallback (No API Key)
 
-```
-You are a senior portfolio manager. You have received three independent analyst reports (bullish, bearish, neutral) for the same stock.
-Synthesize them into a final recommendation.
+When `OPENAI_API_KEY` is not set, the `AiService` generates deterministic analysis based on the numeric score:
 
-Bull case: {bullish}
-Bear case: {bearish}
-Neutral view: {neutral}
+| Score range | Bullish rec | Bearish rec | Neutral rec |
+|-------------|------------|------------|-------------|
+| ≥ 7.0 | BUY | REDUCE | HOLD |
+| 5.0 – 6.9 | ACCUMULATE | REDUCE | HOLD |
+| < 5.0 | ACCUMULATE | SELL | HOLD |
 
-Respond in JSON:
-{
-  "recommendation": "Strong Buy | Buy | Hold | Sell | Strong Sell",
-  "confidence": 0.0-1.0,
-  "rationale": "3-4 sentence synthesis",
-  "keyContradictions": ["contradiction1", "contradiction2"]
-}
-```
+Confidence is derived from `0.5 + score/20` (capped at 0.95).
 
 ---
 
-## Scoring Engine — Signal Classification Prompt
+## Caching
 
-```
-Classify the following trading signals for {symbol}.
+All AI responses are cached in-process for **1 hour** per symbol to minimize API costs.
 
-Volume anomaly: {vol}
-Sentiment velocity: {sent}
-Insider activity: {insider}
-Institutional shift: {inst}
-Price change (1d): {price_pct}
+Estimated cost with GPT-4o-mini:
+- ~200 tokens per analyst × 3 analysts = ~600 tokens/request
+- At $0.15/1M tokens = $0.00009/request
+- 100 analyses/day = ~$0.009/day = ~$0.27/month
 
-Classify as exactly one of:
-- ACCUMULATION (quiet buying, volume without price)
-- SMART_MONEY_ENTRY (insider + institutional convergence)
-- MOMENTUM_IGNITION (volume breakout with price movement)
-- SENTIMENT_PUMP (social/news driven)
-- RISK_WARNING (distribution pattern)
-- NEUTRAL
+---
 
-Output: {"signalType": "...", "rationale": "..."}
-```
+## Extension Points
+
+To add a new analyst persona, duplicate a prompt function in `backend/src/ai/ai.service.ts` and add a new parallel call in `analyzeStock()`. The multi-agent framework supports any number of perspectives.
+
+To switch to a different LLM provider (Anthropic, Mistral, local Ollama), replace the `callGPT()` method — the rest of the service is provider-agnostic.
