@@ -28,7 +28,7 @@ model User {
 model UserSettings {
   id                 String   @id @default(cuid())
   userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields:[userId],references:[id],onDelete:Cascade)
   fmpApiKey          String?
   finnhubApiKey      String?
   polygonApiKey      String?
@@ -67,7 +67,7 @@ model Stock {
 model StockScore {
   id                 String   @id @default(cuid())
   stockId            String
-  stock              Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  stock              Stock    @relation(fields:[stockId],references:[id],onDelete:Cascade)
   fundamentalScore   Float    @default(0)
   technicalScore     Float    @default(0)
   sentimentScore     Float    @default(0)
@@ -87,7 +87,7 @@ model StockScore {
 model StockSignal {
   id          String     @id @default(cuid())
   stockId     String
-  stock       Stock      @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  stock       Stock      @relation(fields:[stockId],references:[id],onDelete:Cascade)
   signalType  SignalType @default(NEUTRAL)
   strength    Float      @default(0)
   description String?
@@ -114,17 +114,17 @@ model ApiCache {
 model Watchlist {
   id      String   @id @default(cuid())
   userId  String
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields:[userId],references:[id],onDelete:Cascade)
   stockId String
-  stock   Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  stock   Stock    @relation(fields:[stockId],references:[id],onDelete:Cascade)
   addedAt DateTime @default(now())
-  @@unique([userId, stockId])
+  @@unique([userId,stockId])
 }
 
 model Report {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields:[userId],references:[id],onDelete:Cascade)
   symbol    String
   title     String
   content   Json

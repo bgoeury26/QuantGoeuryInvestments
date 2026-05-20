@@ -5,7 +5,7 @@ import { AlphaService } from './alpha.service';
 
 @ApiTags('alpha') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('alpha')
 export class AlphaController {
-  constructor(private alphaService: AlphaService) {}
-  @Get('signals/:stockId') getSignals(@Param('stockId') id: string) { return this.alphaService.getLatestSignals(id); }
-  @Get('early-opportunities') getEarlyOpportunities() { return this.alphaService.getEarlyOpportunities(); }
+  constructor(private a: AlphaService) {}
+  @Get('signals/:id') signals(@Param('id') id:string) { return this.a.getLatestSignals(id); }
+  @Get('early-opportunities') early() { return this.a.getEarlyOpportunities(); }
 }

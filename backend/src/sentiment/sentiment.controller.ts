@@ -5,9 +5,8 @@ import { SentimentService } from './sentiment.service';
 
 @ApiTags('sentiment') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('sentiment')
 export class SentimentController {
-  constructor(private s: SentimentService) {}
-  @Get(':symbol/news') getNews(@Param('symbol') sym: string) { return this.s.getNewsSentiment(sym); }
-  @Get(':symbol/reddit') getReddit(@Param('symbol') sym: string) { return this.s.getRedditSentiment(sym); }
-  @Get(':symbol/gdelt') getGdelt(@Param('symbol') sym: string) { return this.s.getGdeltSentiment(sym); }
-  @Get(':symbol/aggregated') getAggregated(@Param('symbol') sym: string) { return this.s.getAggregated(sym, sym); }
+  constructor(private s:SentimentService) {}
+  @Get(':sym/news') news(@Param('sym') sym:string){return this.s.getNews(sym);}
+  @Get(':sym/reddit') reddit(@Param('sym') sym:string){return this.s.getReddit(sym);}
+  @Get(':sym/gdelt') gdelt(@Param('sym') sym:string){return this.s.getGdelt(sym);}
 }

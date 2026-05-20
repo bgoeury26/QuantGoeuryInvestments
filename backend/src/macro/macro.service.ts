@@ -5,40 +5,45 @@ import axios from 'axios';
 
 const FRED_SERIES = {
   gdp: 'GDP', inflation: 'CPIAUCSL', unemployment: 'UNRATE',
-  fedFunds: 'FEDFUNDS', tenYearYield: 'DGS10', vix: 'VIXCLS',
-  sp500pe: 'CAPE', creditSpread: 'BAMLH0A0HYM2',
+  fedFundsRate: 'FEDFUNDS', yieldCurve: 'T10Y2Y', vix: 'VIXCLS',
+  retailSales: 'RSAFS', industrialProduction: 'INDPRO'
 };
 
 @Injectable()
 export class MacroService {
-  constructor(private cache: CacheService, private config: ConfigService) {}
+  constructor(private cache:CacheService, private config:ConfigService) {}
 
-  async getSeries(seriesId: string, limit = 30) {
-    const cached = await this.cache.get('fred', { seriesId, limit });
-    if (cached) return cached;
-    const key = this.config.get('FRED_API_KEY');
-    if (!key) return { series: seriesId, data: [] };
+  async getFredSeries(seriesId:string) {
+    const c=await this.cache.get('fred',{seriesId}); if(c) return c;
+    const k=this.config.get('FRED_API_KEY'); if(!k) return null;
     try {
-      const { data } = await axios.get(`https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${key}&file_type=json&limit=${limit}&sort_order=desc`);
-      const result = { series: seriesId, data: data.observations || [] };
-      await this.cache.set('fred', { seriesId, limit }, result, 14400);
-      return result;
-    } catch { return { series: seriesId, data: [] }; }
+      const {data}=await axios.get(`https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${k}&file_type=json&limit=12&sort_order=desc`);
+      const r=data?.observations||[];
+      await this.cache.set('fred',{seriesId},r,86400); return r;
+    } catch{return null;}
   }
 
-  async getMacroDashboard() {
+  async getMacroSnapshot() {
+    const c=await this.cache.get('macro_snapshot',{}); if(c) return c;
     const results = await Promise.all(
-      Object.entries(FRED_SERIES).map(async ([key, id]) => ({ key, ...(await this.getSeries(id, 12)) }))
+      Object.entries(FRED_SERIES).map(async ([key,id])=>({ key, data:await this.getFredSeries(id) }))
     );
-    return Object.fromEntries(results.map(r => [r.key, r]));
+    const snap = Object.fromEntries(results.map(r=>[r.key,r.data]));
+    await this.cache.set('macro_snapshot',{},snap,86400); return snap;
   }
 
-  computeMacroScore(data: { fedFunds?: number; inflation?: number; vix?: number; creditSpread?: number }): number {
-    const scores: number[] = [];
-    if (data.fedFunds != null) scores.push(data.fedFunds < 2 ? 8 : data.fedFunds < 4 ? 6 : data.fedFunds < 6 ? 4 : 2);
-    if (data.inflation != null) scores.push(data.inflation < 2 ? 8 : data.inflation < 3 ? 7 : data.inflation < 5 ? 5 : 2);
-    if (data.vix != null) scores.push(data.vix < 15 ? 8 : data.vix < 20 ? 7 : data.vix < 30 ? 5 : data.vix < 40 ? 3 : 1);
-    if (data.creditSpread != null) scores.push(data.creditSpread < 3 ? 8 : data.creditSpread < 5 ? 6 : data.creditSpread < 8 ? 4 : 2);
-    return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 5;
+  computeMacroScore(snap:any): number {
+    const scores:number[]=[];
+    // Fed funds rate — lower is better for equities
+    if(snap.fedFundsRate?.length) {
+      const r=parseFloat(snap.fedFundsRate[0]?.value||'5');
+      scores.push(r<2?8:r<4?6:r<6?4:2);
+    }
+    // Yield curve — positive = healthy
+    if(snap.yieldCurve?.length) {
+      const y=parseFloat(snap.yieldCurve[0]?.value||'0');
+      scores.push(y>0.5?8:y>0?6:y>-0.5?4:2);
+    }
+    return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:5;
   }
 }

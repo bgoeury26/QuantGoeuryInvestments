@@ -5,7 +5,7 @@ import { ScoringService } from './scoring.service';
 
 @ApiTags('scoring') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('scoring')
 export class ScoringController {
-  constructor(private scoringService: ScoringService) {}
-  @Get('stock/:stockId') getScore(@Param('stockId') id: string) { return this.scoringService.getLatestScore(id); }
-  @Get('opportunities') getTopOpportunities() { return this.scoringService.getTopOpportunities(10); }
+  constructor(private s: ScoringService) {}
+  @Get('stock/:id') score(@Param('id') id:string) { return this.s.getLatestScore(id); }
+  @Get('opportunities') top() { return this.s.getTopOpportunities(10); }
 }
