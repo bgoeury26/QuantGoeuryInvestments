@@ -1,11 +1,27 @@
-import { Controller, Get, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SettingsService } from './settings.service';
 
-@ApiTags('settings') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('settings')
+@ApiTags('settings')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('settings')
 export class SettingsController {
-  constructor(private s:SettingsService) {}
-  @Get() get(@Request() req){return this.s.getSettings(req.user.id);}
-  @Post() save(@Request() req,@Body() dto:any){return this.s.saveSettings(req.user.id,dto);}
+  constructor(private svc: SettingsService) {}
+
+  @Get()
+  get(@Request() req: any) {
+    return this.svc.getSettings(req.user.userId);
+  }
+
+  @Post()
+  save(@Request() req: any, @Body() body: any) {
+    return this.svc.saveSettings(req.user.userId, body);
+  }
+
+  @Post('test/:provider')
+  test(@Param('provider') provider: string, @Request() req: any) {
+    return this.svc.testProvider(provider, req.user.userId);
+  }
 }
