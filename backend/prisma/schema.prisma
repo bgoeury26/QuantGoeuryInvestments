@@ -7,28 +7,45 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserStatus { PENDING APPROVED REJECTED SUSPENDED }
-enum UserRole { USER ADMIN }
-enum SignalType { ACCUMULATION MOMENTUM_IGNITION SENTIMENT_PUMP SMART_MONEY_ENTRY RISK_WARNING NEUTRAL }
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SignalType {
+  ACCUMULATION
+  MOMENTUM_IGNITION
+  SENTIMENT_PUMP
+  SMART_MONEY_ENTRY
+  RISK_WARNING
+  NEUTRAL
+}
 
 model User {
-  id        String     @id @default(cuid())
-  email     String     @unique
-  password  String
-  name      String
-  role      UserRole   @default(USER)
-  status    UserStatus @default(PENDING)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  settings  UserSettings?
-  watchlist Watchlist[]
-  reports   Report[]
+  id               String           @id @default(cuid())
+  email            String           @unique
+  password         String
+  name             String
+  role             UserRole         @default(USER)
+  status           UserStatus       @default(PENDING)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  settings         UserSettings?
+  watchlistEntries WatchlistEntry[]
+  reports          Report[]
 }
 
 model UserSettings {
   id                 String   @id @default(cuid())
   userId             String   @unique
-  user               User     @relation(fields:[userId],references:[id],onDelete:Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   fmpApiKey          String?
   finnhubApiKey      String?
   polygonApiKey      String?
@@ -46,8 +63,8 @@ model UserSettings {
 }
 
 model Stock {
-  id             String   @id @default(cuid())
-  symbol         String   @unique
+  id             String           @id @default(cuid())
+  symbol         String           @unique
   name           String
   sector         String?
   industry       String?
@@ -57,17 +74,17 @@ model Stock {
   priceChangePct Float?
   volume         Float?
   avgVolume30d   Float?
-  updatedAt      DateTime @updatedAt
-  createdAt      DateTime @default(now())
+  updatedAt      DateTime         @updatedAt
+  createdAt      DateTime         @default(now())
   scores         StockScore[]
   signals        StockSignal[]
-  watchlists     Watchlist[]
+  watchlistEntries WatchlistEntry[]
 }
 
 model StockScore {
   id                 String   @id @default(cuid())
   stockId            String
-  stock              Stock    @relation(fields:[stockId],references:[id],onDelete:Cascade)
+  stock              Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
   fundamentalScore   Float    @default(0)
   technicalScore     Float    @default(0)
   sentimentScore     Float    @default(0)
@@ -80,6 +97,7 @@ model StockScore {
   rankingScore       Float    @default(0)
   anomalyScore       Float    @default(0)
   computedAt         DateTime @default(now())
+
   @@index([stockId])
   @@index([rankingScore])
 }
@@ -87,7 +105,7 @@ model StockScore {
 model StockSignal {
   id          String     @id @default(cuid())
   stockId     String
-  stock       Stock      @relation(fields:[stockId],references:[id],onDelete:Cascade)
+  stock       Stock      @relation(fields: [stockId], references: [id], onDelete: Cascade)
   signalType  SignalType @default(NEUTRAL)
   strength    Float      @default(0)
   description String?
@@ -95,6 +113,7 @@ model StockSignal {
   earlyFlag   Boolean    @default(false)
   detectedAt  DateTime   @default(now())
   expiresAt   DateTime?
+
   @@index([stockId])
   @@index([detectedAt])
 }
@@ -107,28 +126,32 @@ model ApiCache {
   symbol    String?
   createdAt DateTime @default(now())
   expiresAt DateTime
+
   @@index([cacheKey])
   @@index([expiresAt])
 }
 
-model Watchlist {
-  id      String   @id @default(cuid())
-  userId  String
-  user    User     @relation(fields:[userId],references:[id],onDelete:Cascade)
-  stockId String
-  stock   Stock    @relation(fields:[stockId],references:[id],onDelete:Cascade)
-  addedAt DateTime @default(now())
-  @@unique([userId,stockId])
+model WatchlistEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stockId   String
+  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  addedAt   DateTime @default(now())
+
+  @@unique([userId, stockId])
+  @@index([userId])
 }
 
 model Report {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields:[userId],references:[id],onDelete:Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   symbol    String
   title     String
   content   Json
   pdfPath   String?
   createdAt DateTime @default(now())
+
   @@index([userId])
 }

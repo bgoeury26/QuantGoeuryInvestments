@@ -26,7 +26,6 @@ export class ReportsService {
   async generateReport(symbol: string, userId: string) {
     const sym = symbol.toUpperCase();
 
-    // Gather score + signals first (non-fatal if absent)
     const [scoreRes, signalsRes] = await Promise.allSettled([
       this.scoring.computeScore(sym),
       this.alpha.getSignals(sym),
@@ -35,17 +34,22 @@ export class ReportsService {
     const score   = scoreRes.status   === 'fulfilled' ? scoreRes.value   : null;
     const signals = signalsRes.status === 'fulfilled' ? signalsRes.value : [];
 
-    // Build AI payload from whatever data we have
     const topSignal = Array.isArray(signals) && signals.length > 0 ? signals[0] : null;
+
+    // Safely cast drivers from JsonValue to string[]
+    const drivers: string[] = Array.isArray(topSignal?.drivers)
+      ? (topSignal.drivers as unknown[]).filter((d): d is string => typeof d === 'string')
+      : [];
+
     const aiPayload = {
       symbol:       sym,
-      finalScore:   (score as any)?.finalScore         ?? 5,
-      anomalyScore: (score as any)?.anomalyScore        ?? 0,
-      fundamental:  (score as any)?.fundamentalScore    ?? 5,
-      technical:    (score as any)?.technicalScore      ?? 5,
-      sentiment:    (score as any)?.sentimentScore      ?? 5,
-      signalType:   topSignal?.signalType               ?? 'NEUTRAL',
-      drivers:      topSignal?.drivers                  ?? [],
+      finalScore:   ((score as any)?.finalScore         ?? 5)  as number,
+      anomalyScore: ((score as any)?.anomalyScore        ?? 0)  as number,
+      fundamental:  ((score as any)?.fundamentalScore    ?? 5)  as number,
+      technical:    ((score as any)?.technicalScore      ?? 5)  as number,
+      sentiment:    ((score as any)?.sentimentScore      ?? 5)  as number,
+      signalType:   (topSignal?.signalType ?? 'NEUTRAL') as string,
+      drivers,
     };
 
     const aiRes = await Promise.allSettled([this.ai.analyzeStock(aiPayload)]);
@@ -59,7 +63,6 @@ export class ReportsService {
       analysis,
     };
 
-    // Persist report record
     const report = await this.prisma.report.create({
       data: {
         userId,
@@ -69,7 +72,6 @@ export class ReportsService {
       },
     });
 
-    // Attempt PDF generation (Puppeteer optional — graceful fallback)
     try {
       const pdfBuffer = await this.generatePdf(sym, content);
       const dir = path.join(process.cwd(), 'reports');
@@ -93,11 +95,34 @@ export class ReportsService {
     return fs.readFileSync(report.pdfPath);
   }
 
-  // ── PDF generation (Puppeteer) ───────────────────────────────────────────
+  /** Public download — no user ownership check (used by admin download endpoint) */
+  async downloadReport(id: string): Promise<Buffer> {
+    const report = await this.prisma.report.findUnique({ where: { id } });
+    if (!report) throw new Error('Report not found');
+    if (report.pdfPath && fs.existsSync(report.pdfPath)) {
+      return fs.readFileSync(report.pdfPath);
+    }
+    // Fallback: regenerate PDF from stored content
+    try {
+      const content = report.content as any;
+      return await this.generatePdf(report.symbol, content);
+    } catch {
+      // Last resort: return minimal PDF placeholder
+      return Buffer.from(`Report ${id} — PDF not available`, 'utf-8');
+    }
+  }
+
+  // ── PDF generation (Puppeteer — optional, graceful fallback) ─────────────
 
   private async generatePdf(symbol: string, content: any): Promise<Buffer> {
-    const puppeteer = await import('puppeteer');
-    const browser = await puppeteer.default.launch({
+    // Dynamic import with graceful fallback if puppeteer not installed
+    let puppeteerMod: any;
+    try {
+      puppeteerMod = await import('puppeteer');
+    } catch {
+      throw new Error('puppeteer not installed');
+    }
+    const browser = await puppeteerMod.default.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });

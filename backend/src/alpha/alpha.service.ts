@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { $Enums } from '@prisma/client';
 
 @Injectable()
 export class AlphaService {
@@ -53,13 +54,13 @@ export class AlphaService {
 
   classifySignal(
     vol: number, sent: number, insider: number, inst: number, pricePct: number,
-  ): string {
-    if (insider > 0.6 && inst > 0.4)                    return 'SMART_MONEY_ENTRY';
-    if (vol > 0.6 && Math.abs(pricePct) < 0.02)         return 'ACCUMULATION';
-    if (sent > 0.7 && vol > 0.5)                        return 'SENTIMENT_PUMP';
-    if (vol > 0.7 && pricePct > 0.02)                   return 'MOMENTUM_IGNITION';
-    if (vol > 0.5 && insider < 0.1 && pricePct < -0.03) return 'RISK_WARNING';
-    return 'NEUTRAL';
+  ): $Enums.SignalType {
+    if (insider > 0.6 && inst > 0.4)                    return $Enums.SignalType.SMART_MONEY_ENTRY;
+    if (vol > 0.6 && Math.abs(pricePct) < 0.02)         return $Enums.SignalType.ACCUMULATION;
+    if (sent > 0.7 && vol > 0.5)                        return $Enums.SignalType.SENTIMENT_PUMP;
+    if (vol > 0.7 && pricePct > 0.02)                   return $Enums.SignalType.MOMENTUM_IGNITION;
+    if (vol > 0.5 && insider < 0.1 && pricePct < -0.03) return $Enums.SignalType.RISK_WARNING;
+    return $Enums.SignalType.NEUTRAL;
   }
 
   isEarlyOpportunity(anomaly: number, pricePct: number): boolean {
@@ -98,10 +99,10 @@ export class AlphaService {
     const stock = await this.prisma.stock.findUnique({
       where: { symbol: symbol.toUpperCase() },
     });
-    if (!stock) return { symbol, anomalyScore: 0, signalType: 'NEUTRAL', earlyFlag: false };
+    if (!stock) return { symbol, anomalyScore: 0, signalType: $Enums.SignalType.NEUTRAL, earlyFlag: false };
 
     const signals = await this.getLatestSignals(stock.id);
-    if (!signals.length) return { symbol, anomalyScore: 0, signalType: 'NEUTRAL', earlyFlag: false, signals: [] };
+    if (!signals.length) return { symbol, anomalyScore: 0, signalType: $Enums.SignalType.NEUTRAL, earlyFlag: false, signals: [] };
 
     const top = signals[0];
     return {
@@ -129,12 +130,21 @@ export class AlphaService {
 
   /** Persist a new signal */
   async saveSignal(stockId: string, opts: {
-    signalType: string;
+    signalType: $Enums.SignalType;
     strength:   number;
     earlyFlag:  boolean;
     drivers:    string[];
     expiresAt:  Date;
   }) {
-    return this.prisma.stockSignal.create({ data: { stockId, ...opts } });
+    return this.prisma.stockSignal.create({
+      data: {
+        stockId,
+        signalType: opts.signalType,
+        strength:   opts.strength,
+        earlyFlag:  opts.earlyFlag,
+        drivers:    opts.drivers,
+        expiresAt:  opts.expiresAt,
+      },
+    });
   }
 }

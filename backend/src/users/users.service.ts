@@ -36,7 +36,6 @@ export class UsersService {
   }
 
   async addToWatchlist(userId: string, stockId: string) {
-    // upsert so duplicate calls are idempotent
     return this.prisma.watchlistEntry.upsert({
       where:  { userId_stockId: { userId, stockId } },
       update: {},
