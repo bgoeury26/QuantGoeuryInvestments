@@ -1,125 +1,130 @@
-import { PrismaClient, UserRole, UserStatus, SignalType } from '@prisma/client';
+import { PrismaClient, UserRole, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+const STOCKS = [
+  { symbol: 'AAPL',  name: 'Apple Inc.',                  sector: 'Technology',        industry: 'Consumer Electronics' },
+  { symbol: 'MSFT',  name: 'Microsoft Corporation',        sector: 'Technology',        industry: 'Software—Infrastructure' },
+  { symbol: 'NVDA',  name: 'NVIDIA Corporation',           sector: 'Technology',        industry: 'Semiconductors' },
+  { symbol: 'GOOGL', name: 'Alphabet Inc.',                sector: 'Communication',     industry: 'Internet Content & Information' },
+  { symbol: 'AMZN',  name: 'Amazon.com Inc.',             sector: 'Consumer Cyclical',  industry: 'Internet Retail' },
+  { symbol: 'META',  name: 'Meta Platforms Inc.',          sector: 'Communication',     industry: 'Internet Content & Information' },
+  { symbol: 'TSLA',  name: 'Tesla Inc.',                   sector: 'Consumer Cyclical', industry: 'Auto Manufacturers' },
+  { symbol: 'JPM',   name: 'JPMorgan Chase & Co.',         sector: 'Financial',         industry: 'Banks—Diversified' },
+  { symbol: 'V',     name: 'Visa Inc.',                    sector: 'Financial',         industry: 'Credit Services' },
+  { symbol: 'JNJ',   name: 'Johnson & Johnson',            sector: 'Healthcare',        industry: 'Drug Manufacturers' },
+  { symbol: 'WMT',   name: 'Walmart Inc.',                 sector: 'Consumer Defensive', industry: 'Discount Stores' },
+  { symbol: 'XOM',   name: 'Exxon Mobil Corporation',     sector: 'Energy',            industry: 'Oil & Gas Integrated' },
+  { symbol: 'UNH',   name: 'UnitedHealth Group Inc.',      sector: 'Healthcare',        industry: 'Healthcare Plans' },
+  { symbol: 'MA',    name: 'Mastercard Incorporated',      sector: 'Financial',         industry: 'Credit Services' },
+  { symbol: 'AVGO',  name: 'Broadcom Inc.',                sector: 'Technology',        industry: 'Semiconductors' },
+  { symbol: 'CVX',   name: 'Chevron Corporation',          sector: 'Energy',            industry: 'Oil & Gas Integrated' },
+  { symbol: 'HD',    name: 'The Home Depot Inc.',          sector: 'Consumer Cyclical', industry: 'Home Improvement Retail' },
+  { symbol: 'ABBV',  name: 'AbbVie Inc.',                  sector: 'Healthcare',        industry: 'Drug Manufacturers' },
+  { symbol: 'BAC',   name: 'Bank of America Corporation',  sector: 'Financial',         industry: 'Banks—Diversified' },
+  { symbol: 'KO',    name: 'The Coca-Cola Company',        sector: 'Consumer Defensive', industry: 'Beverages—Non-Alcoholic' },
+  { symbol: 'PFE',   name: 'Pfizer Inc.',                  sector: 'Healthcare',        industry: 'Drug Manufacturers' },
+  { symbol: 'ORCL',  name: 'Oracle Corporation',           sector: 'Technology',        industry: 'Software—Infrastructure' },
+  { symbol: 'AMD',   name: 'Advanced Micro Devices Inc.',  sector: 'Technology',        industry: 'Semiconductors' },
+  { symbol: 'CRM',   name: 'Salesforce Inc.',              sector: 'Technology',        industry: 'Software—Application' },
+  { symbol: 'SPY',   name: 'SPDR S&P 500 ETF Trust',      sector: 'ETF',               industry: 'Broad Market' },
+];
+
 async function main() {
-  console.log('🌱 Seeding database...');
+  console.log('🌱  Seeding database...');
 
-  // ---- Admin user (auto-approved)
-  const adminHash = await bcrypt.hash('Admin@123456', 12);
+  // ── Admin user ──────────────────────────────────────────────────────────
+  const adminEmail = process.env.ADMIN_EMAIL ?? 'goeurybenjamin@gmail.com';
+  const adminHash  = await bcrypt.hash('ChangeMe123!', 12);
+
   const admin = await prisma.user.upsert({
-    where: { email: 'goeurybenjamin@gmail.com' },
-    update: {},
+    where:  { email: adminEmail },
+    update: { role: UserRole.ADMIN, status: UserStatus.APPROVED },
     create: {
-      email: 'goeurybenjamin@gmail.com',
+      email:    adminEmail,
+      name:     'Benjamin Goeury',
       password: adminHash,
-      name: 'Benjamin Goeury',
-      role: UserRole.ADMIN,
-      status: UserStatus.APPROVED,
+      role:     UserRole.ADMIN,
+      status:   UserStatus.APPROVED,
     },
   });
-  console.log(`✅ Admin user: ${admin.email}`);
+  console.log(`✅  Admin user: ${admin.email}`);
 
-  // ---- Demo user
-  const demoHash = await bcrypt.hash('Demo@123456', 12);
-  const demo = await prisma.user.upsert({
-    where: { email: 'demo@quantgoeury.com' },
-    update: {},
-    create: {
-      email: 'demo@quantgoeury.com',
-      password: demoHash,
-      name: 'Demo User',
-      role: UserRole.USER,
-      status: UserStatus.APPROVED,
-    },
-  });
-  console.log(`✅ Demo user: ${demo.email}`);
-
-  // ---- Seed stocks (S&P 500 sample)
-  const stocks = [
-    { symbol: 'AAPL', name: 'Apple Inc.', sector: 'Technology', industry: 'Consumer Electronics', marketCap: 3100000000000, lastPrice: 196.45, priceChangePct: 0.82, avgVolume30d: 58000000 },
-    { symbol: 'MSFT', name: 'Microsoft Corporation', sector: 'Technology', industry: 'Software', marketCap: 2900000000000, lastPrice: 414.67, priceChangePct: 0.54, avgVolume30d: 22000000 },
-    { symbol: 'NVDA', name: 'NVIDIA Corporation', sector: 'Technology', industry: 'Semiconductors', marketCap: 2600000000000, lastPrice: 1065.78, priceChangePct: 2.14, avgVolume30d: 42000000 },
-    { symbol: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology', industry: 'Internet Content', marketCap: 2100000000000, lastPrice: 170.23, priceChangePct: -0.31, avgVolume30d: 25000000 },
-    { symbol: 'AMZN', name: 'Amazon.com Inc.', sector: 'Consumer Cyclical', industry: 'Internet Retail', marketCap: 1950000000000, lastPrice: 185.12, priceChangePct: 1.02, avgVolume30d: 38000000 },
-    { symbol: 'META', name: 'Meta Platforms Inc.', sector: 'Technology', industry: 'Internet Content', marketCap: 1400000000000, lastPrice: 530.44, priceChangePct: 0.78, avgVolume30d: 18000000 },
-    { symbol: 'TSLA', name: 'Tesla Inc.', sector: 'Consumer Cyclical', industry: 'Auto Manufacturers', marketCap: 780000000000, lastPrice: 248.50, priceChangePct: -1.23, avgVolume30d: 95000000 },
-    { symbol: 'JPM', name: 'JPMorgan Chase & Co.', sector: 'Financial Services', industry: 'Banks', marketCap: 560000000000, lastPrice: 195.34, priceChangePct: 0.21, avgVolume30d: 9500000 },
-    { symbol: 'V', name: 'Visa Inc.', sector: 'Financial Services', industry: 'Credit Services', marketCap: 540000000000, lastPrice: 270.89, priceChangePct: 0.45, avgVolume30d: 7200000 },
-    { symbol: 'JNJ', name: 'Johnson & Johnson', sector: 'Healthcare', industry: 'Drug Manufacturers', marketCap: 380000000000, lastPrice: 157.22, priceChangePct: -0.15, avgVolume30d: 6800000 },
-    { symbol: 'WMT', name: 'Walmart Inc.', sector: 'Consumer Defensive', industry: 'Discount Stores', marketCap: 510000000000, lastPrice: 63.45, priceChangePct: 0.33, avgVolume30d: 12000000 },
-    { symbol: 'XOM', name: 'Exxon Mobil Corporation', sector: 'Energy', industry: 'Oil & Gas', marketCap: 450000000000, lastPrice: 112.67, priceChangePct: 0.67, avgVolume30d: 15000000 },
-    { symbol: 'PLTR', name: 'Palantir Technologies', sector: 'Technology', industry: 'Software', marketCap: 52000000000, lastPrice: 24.78, priceChangePct: 3.45, avgVolume30d: 68000000 },
-    { symbol: 'AMD', name: 'Advanced Micro Devices', sector: 'Technology', industry: 'Semiconductors', marketCap: 270000000000, lastPrice: 166.34, priceChangePct: 1.87, avgVolume30d: 55000000 },
-    { symbol: 'SOFI', name: 'SoFi Technologies', sector: 'Financial Services', industry: 'Fintech', marketCap: 9800000000, lastPrice: 9.12, priceChangePct: 4.21, avgVolume30d: 48000000 },
-  ];
-
-  for (const s of stocks) {
-    const stock = await prisma.stock.upsert({
-      where: { symbol: s.symbol },
-      update: { lastPrice: s.lastPrice, priceChangePct: s.priceChangePct },
-      create: { ...s, priceChange: s.lastPrice * (s.priceChangePct / 100) },
+  // ── Stock universe ───────────────────────────────────────────────────────
+  for (const s of STOCKS) {
+    await prisma.stock.upsert({
+      where:  { symbol: s.symbol },
+      update: { name: s.name, sector: s.sector, industry: s.industry },
+      create: s,
     });
+  }
+  console.log(`✅  Seeded ${STOCKS.length} stocks`);
 
-    // Seed a sample score for each stock
-    const fundamentalScore = 4 + Math.random() * 5;
-    const technicalScore   = 3 + Math.random() * 6;
-    const sentimentScore   = 3 + Math.random() * 5;
-    const institutionalScore = 4 + Math.random() * 5;
-    const analystScore     = 3 + Math.random() * 6;
-    const politicalScore   = 2 + Math.random() * 6;
-    const macroScore       = 3 + Math.random() * 5;
+  // ── Demo seed scores (static placeholders) ───────────────────────────────
+  const stocksInDb = await prisma.stock.findMany();
+  const now        = new Date();
+  const expires    = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const weightedSum =
-      fundamentalScore   * 2.5 +
-      technicalScore     * 2.0 +
-      sentimentScore     * 1.5 +
-      institutionalScore * 2.0 +
-      analystScore       * 1.0 +
-      politicalScore     * 0.5 +
-      macroScore         * 0.5;
-    const maxPossible = 10 * (2.5 + 2.0 + 1.5 + 2.0 + 1.0 + 0.5 + 0.5);
-    const finalScore = (weightedSum / maxPossible) * 10;
-    const confidenceFactor = 0.75 + Math.random() * 0.35;
-    const anomalyScore = Math.random() * 0.8;
-    const rankingScore = finalScore + 1.5 * anomalyScore + Math.random() * 0.5;
+  let scoreCount  = 0;
+  let signalCount = 0;
+
+  // Sample data to make the dashboard non-empty on first boot
+  const DEMO: Record<string, { f: number; t: number; s: number; i: number; a: number; p: number; m: number; signal: string; early: boolean }> = {
+    NVDA: { f: 8.5, t: 8.0, s: 8.2, i: 7.8, a: 8.5, p: 0.6, m: 0.5, signal: 'SMART_MONEY_ENTRY', early: true  },
+    AAPL: { f: 7.8, t: 7.2, s: 6.5, i: 7.5, a: 7.0, p: 0.5, m: 0.5, signal: 'ACCUMULATION',      early: false },
+    MSFT: { f: 8.2, t: 7.5, s: 7.0, i: 7.8, a: 8.0, p: 0.5, m: 0.5, signal: 'ACCUMULATION',      early: false },
+    META: { f: 7.5, t: 8.2, s: 7.8, i: 6.8, a: 7.5, p: 0.4, m: 0.5, signal: 'MOMENTUM_IGNITION', early: true  },
+    AMZN: { f: 7.0, t: 6.8, s: 6.2, i: 6.5, a: 7.2, p: 0.5, m: 0.5, signal: 'NEUTRAL',           early: false },
+    TSLA: { f: 5.5, t: 6.5, s: 6.8, i: 5.2, a: 4.5, p: 0.8, m: 0.5, signal: 'SENTIMENT_PUMP',    early: false },
+    AMD:  { f: 7.2, t: 7.8, s: 7.5, i: 6.8, a: 7.8, p: 0.5, m: 0.5, signal: 'MOMENTUM_IGNITION', early: true  },
+  };
+
+  for (const stock of stocksInDb) {
+    const d = DEMO[stock.symbol];
+    if (!d) continue;
+
+    const conf      = 0.8 + Math.random() * 0.3;
+    const weighted  = (d.f * 2.5 + d.t * 2.0 + d.s * 1.5 + d.i * 2.0 + d.a * 1.0 + d.p * 0.5 + d.m * 0.5) / 10;
+    const final     = Math.min(10, weighted * conf);
+    const anomaly   = d.early ? 0.55 + Math.random() * 0.2 : 0.1 + Math.random() * 0.2;
+    const ranking   = final + 2.0 * anomaly + (d.t > 7 ? 0.5 : 0);
 
     await prisma.stockScore.create({
       data: {
-        stockId: stock.id,
-        fundamentalScore, technicalScore, sentimentScore,
-        institutionalScore, analystScore, politicalScore, macroScore,
-        finalScore: parseFloat((finalScore * confidenceFactor).toFixed(3)),
-        confidenceFactor: parseFloat(confidenceFactor.toFixed(3)),
-        anomalyScore: parseFloat(anomalyScore.toFixed(3)),
-        rankingScore: parseFloat(rankingScore.toFixed(3)),
+        stockId:            stock.id,
+        fundamentalScore:   d.f,
+        technicalScore:     d.t,
+        sentimentScore:     d.s,
+        institutionalScore: d.i,
+        analystScore:       d.a,
+        politicalScore:     d.p,
+        macroScore:         d.m,
+        finalScore:         parseFloat(final.toFixed(2)),
+        confidenceFactor:   parseFloat(conf.toFixed(3)),
+        anomalyScore:       parseFloat(anomaly.toFixed(3)),
+        rankingScore:       parseFloat(ranking.toFixed(2)),
       },
     });
+    scoreCount++;
 
-    // Seed signals for high-anomaly stocks
-    if (anomalyScore > 0.5) {
-      const types: SignalType[] = ['ACCUMULATION', 'MOMENTUM_IGNITION', 'SMART_MONEY_ENTRY'];
-      await prisma.stockSignal.create({
-        data: {
-          stockId: stock.id,
-          signalType: types[Math.floor(Math.random() * types.length)],
-          strength: anomalyScore,
-          earlyFlag: anomalyScore > 0.65,
-          description: `Unusual activity detected on ${s.symbol}`,
-          drivers: ['volume_spike', 'sentiment_velocity', 'institutional_shift'],
-          expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
-        },
-      });
-    }
-    console.log(`  📊 ${s.symbol} seeded (score: ${(finalScore * confidenceFactor).toFixed(2)})`);
+    await prisma.stockSignal.create({
+      data: {
+        stockId:    stock.id,
+        signalType: d.signal,
+        strength:   anomaly,
+        earlyFlag:  d.early,
+        drivers:    d.early ? ['volume_spike', 'institutional_rotation'] : ['technical_crossover'],
+        expiresAt:  expires,
+      },
+    });
+    signalCount++;
   }
 
-  console.log('\n✅ Seed complete!');
-  console.log('   Admin login:  goeurybenjamin@gmail.com / Admin@123456');
-  console.log('   Demo login:   demo@quantgoeury.com / Demo@123456');
+  console.log(`✅  Seeded ${scoreCount} scores, ${signalCount} signals`);
+  console.log('🎉  Seed complete.');
 }
 
 main()
-  .catch((e) => { console.error(e); process.exit(1); })
+  .catch(e => { console.error(e); process.exit(1); })
   .finally(() => prisma.$disconnect());
