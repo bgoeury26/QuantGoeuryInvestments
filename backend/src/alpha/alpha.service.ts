@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AlphaService {
   constructor(private prisma: PrismaService) {}
 
-  // ── Anomaly detectors ──
+  // ── Anomaly detectors ─────────────────────────────────────────────────────
 
   detectVolumeAnomaly(current: number, hist: number[]): number {
     if (hist.length < 5) return 0;
@@ -35,7 +35,7 @@ export class AlphaService {
 
   detectInstitutionalShift(cur: number, prev: number, fundsUp: number, total: number): number {
     if (prev === 0) return 0;
-    const change      = (cur - prev) / prev;
+    const change        = (cur - prev) / prev;
     const participation = total > 0 ? fundsUp / total : 0;
     return change > 0 ? Math.min(1, change * 2 + participation * 0.3) : 0;
   }
@@ -45,10 +45,10 @@ export class AlphaService {
   }
 
   classifySignal(vol: number, sent: number, insider: number, inst: number, pricePct: number): string {
-    if (insider > 0.6 && inst > 0.4)           return 'SMART_MONEY_ENTRY';
-    if (vol > 0.6 && Math.abs(pricePct) < 0.02) return 'ACCUMULATION';
-    if (sent > 0.7 && vol > 0.5)               return 'SENTIMENT_PUMP';
-    if (vol > 0.7 && pricePct > 0.02)          return 'MOMENTUM_IGNITION';
+    if (insider > 0.6 && inst > 0.4)             return 'SMART_MONEY_ENTRY';
+    if (vol > 0.6 && Math.abs(pricePct) < 0.02)  return 'ACCUMULATION';
+    if (sent > 0.7 && vol > 0.5)                 return 'SENTIMENT_PUMP';
+    if (vol > 0.7 && pricePct > 0.02)            return 'MOMENTUM_IGNITION';
     if (vol > 0.5 && insider < 0.1 && pricePct < -0.03) return 'RISK_WARNING';
     return 'NEUTRAL';
   }
@@ -57,7 +57,7 @@ export class AlphaService {
     return anomaly > 0.45 && Math.abs(pricePct) < 0.03;
   }
 
-  // ── DB queries ──
+  // ── DB queries ────────────────────────────────────────────────────────────
 
   async getLatestSignals(stockId: string) {
     return this.prisma.stockSignal.findMany({
@@ -102,13 +102,21 @@ export class AlphaService {
     };
   }
 
+  /**
+   * getSignals(symbol) — used by ReportsService.
+   * Returns the same enriched anomaly object as getAnomalyBySymbol.
+   */
+  async getSignals(symbol: string) {
+    return this.getAnomalyBySymbol(symbol);
+  }
+
   /** Persist a new signal */
   async saveSignal(stockId: string, opts: {
-    signalType:  string;
-    strength:    number;
-    earlyFlag:   boolean;
-    drivers:     string[];
-    expiresAt:   Date;
+    signalType: string;
+    strength:   number;
+    earlyFlag:  boolean;
+    drivers:    string[];
+    expiresAt:  Date;
   }) {
     return this.prisma.stockSignal.create({ data: { stockId, ...opts } });
   }

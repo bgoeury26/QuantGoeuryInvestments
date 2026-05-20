@@ -8,16 +8,17 @@ import { UsersService } from '../../users/users.service';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(config: ConfigService, private users: UsersService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest:   ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_SECRET') || 'fallback-dev-secret-change-me',
+      secretOrKey:      config.get<string>('JWT_SECRET') || 'fallback-dev-secret-change-me',
     });
   }
 
-  async validate(payload: { sub: string; email: string; role: string }) {
+  async validate(payload: { sub: string; email: string; role: string; status: string }) {
+    // Re-validate status from DB on every request (prevents stale tokens for suspended users)
     const user = await this.users.findById(payload.sub);
-    if (!user) throw new UnauthorizedException();
-    if (user.status !== 'APPROVED') throw new UnauthorizedException('Account not approved');
-    return { sub: payload.sub, email: payload.email, role: payload.role };
+    if (!user)                        throw new UnauthorizedException('User not found');
+    if (user.status !== 'APPROVED')   throw new UnauthorizedException('Account not approved');
+    return { sub: payload.sub, email: payload.email, role: payload.role, status: user.status };
   }
 }
