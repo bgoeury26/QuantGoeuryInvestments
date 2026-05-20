@@ -15,7 +15,6 @@ import { ReportsModule } from "./reports/reports.module";
 import { SettingsModule } from "./settings/settings.module";
 import { CacheModule } from "./cache/cache.module";
 import { AdminModule } from "./admin/admin.module";
-import { AiModule } from "./ai/ai.module";
 
 @Module({
   imports: [
@@ -35,7 +34,6 @@ import { AiModule } from "./ai/ai.module";
     ReportsModule,
     SettingsModule,
     AdminModule,
-    AiModule,
   ],
 })
 export class AppModule {}

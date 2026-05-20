@@ -16,7 +16,7 @@ async function main() {
       status: UserStatus.APPROVED,
     },
   });
-  console.log("Admin created:", admin.email);
+  console.log("Admin user created:", admin.email);
 
   const stocks = [
     { symbol: "AAPL", name: "Apple Inc.", sector: "Technology" },
@@ -38,7 +38,7 @@ async function main() {
     { symbol: "AVGO", name: "Broadcom Inc.", sector: "Technology" },
     { symbol: "MRK", name: "Merck & Co. Inc.", sector: "Healthcare" },
     { symbol: "CVX", name: "Chevron Corporation", sector: "Energy" },
-    { symbol: "PLTR", name: "Palantir Technologies", sector: "Technology" },
+    { symbol: "AMD", name: "Advanced Micro Devices", sector: "Technology" }
   ];
 
   for (const stock of stocks) {

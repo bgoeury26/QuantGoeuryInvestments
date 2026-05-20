@@ -6,6 +6,7 @@
     "build": "nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "prisma:generate": "prisma generate",
@@ -42,6 +43,7 @@
     "@types/bcrypt": "^5.0.0",
     "@types/node": "^20.0.0",
     "@types/passport-jwt": "^3.0.0",
+    "@types/passport-local": "^1.0.38",
     "prisma": "^5.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.1.3"
