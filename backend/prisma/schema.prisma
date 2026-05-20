@@ -1,0 +1,156 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SignalType {
+  ACCUMULATION
+  MOMENTUM_IGNITION
+  SENTIMENT_PUMP
+  SMART_MONEY_ENTRY
+  RISK_WARNING
+  NEUTRAL
+}
+
+model User {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  password  String
+  name      String
+  role      UserRole   @default(USER)
+  status    UserStatus @default(PENDING)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  settings  UserSettings?
+  watchlist Watchlist[]
+  reports   Report[]
+}
+
+model UserSettings {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fmpApiKey          String?
+  finnhubApiKey      String?
+  polygonApiKey      String?
+  alphaVantageKey    String?
+  newsApiKey         String?
+  fredApiKey         String?
+  redditClientId     String?
+  redditClientSecret String?
+  blueskyIdentifier  String?
+  blueskyPassword    String?
+  congressApiKey     String?
+  gdeltEnabled       Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Stock {
+  id             String   @id @default(cuid())
+  symbol         String   @unique
+  name           String
+  sector         String?
+  industry       String?
+  marketCap      Float?
+  lastPrice      Float?
+  priceChange    Float?
+  priceChangePct Float?
+  volume         Float?
+  avgVolume30d   Float?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  scores         StockScore[]
+  signals        StockSignal[]
+  watchlists     Watchlist[]
+}
+
+model StockScore {
+  id                 String   @id @default(cuid())
+  stockId            String
+  stock              Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  fundamentalScore   Float    @default(0)
+  technicalScore     Float    @default(0)
+  sentimentScore     Float    @default(0)
+  institutionalScore Float    @default(0)
+  analystScore       Float    @default(0)
+  politicalScore     Float    @default(0)
+  macroScore         Float    @default(0)
+  finalScore         Float    @default(0)
+  confidenceFactor   Float    @default(1.0)
+  rankingScore       Float    @default(0)
+  anomalyScore       Float    @default(0)
+  computedAt         DateTime @default(now())
+
+  @@index([stockId])
+  @@index([rankingScore])
+}
+
+model StockSignal {
+  id          String     @id @default(cuid())
+  stockId     String
+  stock       Stock      @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  signalType  SignalType @default(NEUTRAL)
+  strength    Float      @default(0)
+  description String?
+  drivers     Json?
+  earlyFlag   Boolean    @default(false)
+  detectedAt  DateTime   @default(now())
+  expiresAt   DateTime?
+
+  @@index([stockId])
+  @@index([detectedAt])
+}
+
+model ApiCache {
+  id        String   @id @default(cuid())
+  cacheKey  String   @unique
+  data      Json
+  endpoint  String
+  symbol    String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([cacheKey])
+  @@index([expiresAt])
+}
+
+model Watchlist {
+  id      String   @id @default(cuid())
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stockId String
+  stock   Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  addedAt DateTime @default(now())
+
+  @@unique([userId, stockId])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symbol    String
+  title     String
+  content   Json
+  pdfPath   String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
