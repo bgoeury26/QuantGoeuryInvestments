@@ -90,7 +90,14 @@ export class ReportsService {
     const report = await this.getReport(id);
 
     try {
-      const puppeteer = await (import as any)('puppeteer').catch(() => null);
+      // puppeteer is an optional peer — skip cleanly if not installed
+      let puppeteer: any = null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        puppeteer = require('puppeteer');
+      } catch {
+        puppeteer = null;
+      }
       if (puppeteer) {
         const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
         const page = await browser.newPage();
