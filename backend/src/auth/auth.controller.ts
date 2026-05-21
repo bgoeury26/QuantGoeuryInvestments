@@ -1,38 +1,41 @@
-import {
-  Controller,
-  Post,
-  Body,
-  UseGuards,
-  Request,
-  Get,
-  HttpCode,
-  HttpStatus,
-} from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './jwt-auth.guard';
-import { User } from '@prisma/client';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private auth: AuthService) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  async register(
-    @Body() body: { email: string; password: string; name: string },
-  ) {
-    return this.auth.register(body.email, body.password, body.name);
+  async register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
   }
 
-  @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() body: { email: string; password: string }) {
-    return this.auth.login(body.email, body.password);
+  @Post('login')
+  async login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  async me(@Request() req: any): Promise<Partial<User>> {
-    const { passwordHash, ...user } = req.user as User;
-    return user;
+  async me(@Request() req: any) {
+    const user = req.user;
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  async logout() {
+    return { message: 'Logged out successfully' };
   }
 }

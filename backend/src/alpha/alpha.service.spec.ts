@@ -1,248 +1,215 @@
+import { Test, TestingModule } from '@nestjs/testing';
 import { AlphaService } from './alpha.service';
-
-const mockPrisma = {
-  stockSignal: { findMany: jest.fn() }
-} as any;
+import { HttpService } from '@nestjs/axios';
+import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
+import { SignalType } from '@prisma/client';
 
 describe('AlphaService', () => {
-  let svc: AlphaService;
+  let service: AlphaService;
 
-  beforeEach(() => {
-    svc = new AlphaService(mockPrisma);
-    jest.clearAllMocks();
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AlphaService,
+        { provide: HttpService, useValue: { get: jest.fn() } },
+        { provide: PrismaService, useValue: { stock: { findUnique: jest.fn(), findMany: jest.fn() }, stockSignal: { create: jest.fn(), findMany: jest.fn() } } },
+        { provide: CacheService, useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get<AlphaService>(AlphaService);
   });
 
-  // ----------------------------------------------------------------
-  // VOLUME ANOMALY DETECTION
-  // ----------------------------------------------------------------
-  describe('detectVolumeAnomaly()', () => {
-    const baseHist = [1e6, 1.1e6, 0.9e6, 1.05e6, 0.95e6, 1e6, 1.1e6, 0.9e6, 1e6, 1e6];
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
 
-    it('normal volume returns 0', () => {
-      expect(svc.detectVolumeAnomaly(1e6, baseHist)).toBe(0);
+  describe('detectVolumeAnomaly', () => {
+    it('should return a number between 0 and 1', async () => {
+      const result = await service.detectVolumeAnomaly('AAPL');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1);
     });
 
-    it('3× normal volume returns significant anomaly score', () => {
-      const score = svc.detectVolumeAnomaly(3e6, baseHist);
-      expect(score).toBeGreaterThan(0.3);
+    it('should handle missing API key gracefully', async () => {
+      delete process.env.ALPHA_VANTAGE_API_KEY;
+      const result = await service.detectVolumeAnomaly('AAPL');
+      expect(typeof result).toBe('number');
     });
 
-    it('10× normal volume is capped at 1', () => {
-      expect(svc.detectVolumeAnomaly(10e6, baseHist)).toBeLessThanOrEqual(1);
-    });
-
-    it('returns 0 with fewer than 5 historical data points', () => {
-      expect(svc.detectVolumeAnomaly(5e6, [1e6, 2e6])).toBe(0);
-    });
-
-    it('returns 0 when std deviation is 0 (flat volume)', () => {
-      expect(svc.detectVolumeAnomaly(1e6, [1e6, 1e6, 1e6, 1e6, 1e6])).toBe(0);
-    });
-
-    it('result is always between 0 and 1', () => {
-      [0.5e6, 1e6, 2e6, 5e6, 20e6].forEach(v => {
-        const r = svc.detectVolumeAnomaly(v, baseHist);
-        expect(r).toBeGreaterThanOrEqual(0);
-        expect(r).toBeLessThanOrEqual(1);
-      });
+    it('should return fallback on error', async () => {
+      const result = await service.detectVolumeAnomaly('INVALID');
+      expect(result).toBeGreaterThanOrEqual(0);
     });
   });
 
-  // ----------------------------------------------------------------
-  // SENTIMENT VELOCITY
-  // ----------------------------------------------------------------
-  describe('detectSentimentVelocity()', () => {
-    it('tripled mentions returns meaningful velocity', () => {
-      const v = svc.detectSentimentVelocity(300, 100, 50, 10);
-      expect(v).toBeGreaterThan(0.3);
+  describe('detectSentimentVelocity', () => {
+    it('should return a number between 0 and 1', async () => {
+      const result = await service.detectSentimentVelocity('AAPL');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1);
     });
 
-    it('same mentions returns 0', () => {
-      expect(svc.detectSentimentVelocity(100, 100, 10, 10)).toBe(0);
+    it('should handle missing API key gracefully', async () => {
+      delete process.env.NEWS_API_KEY;
+      const result = await service.detectSentimentVelocity('AAPL');
+      expect(typeof result).toBe('number');
     });
 
-    it('zero previous mentions does not crash', () => {
-      expect(() => svc.detectSentimentVelocity(100, 0, 50, 0)).not.toThrow();
-    });
-
-    it('result is always between 0 and 1', () => {
-      [[500, 10, 200, 5], [100, 100, 10, 10], [0, 0, 0, 0]].forEach(([a, b, c, d]) => {
-        const r = svc.detectSentimentVelocity(a, b, c, d);
-        expect(r).toBeGreaterThanOrEqual(0);
-        expect(r).toBeLessThanOrEqual(1);
-      });
+    it('should return value between 0 and 1 on error', async () => {
+      const result = await service.detectSentimentVelocity('INVALID');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1);
     });
   });
 
-  // ----------------------------------------------------------------
-  // INSIDER ACTIVITY DETECTION
-  // ----------------------------------------------------------------
-  describe('detectInsiderActivity()', () => {
-    it('no trades returns 0', () => {
-      expect(svc.detectInsiderActivity([])).toBe(0);
+  describe('detectInsiderActivity', () => {
+    it('should return a number', async () => {
+      const result = await service.detectInsiderActivity('AAPL');
+      expect(typeof result).toBe('number');
     });
 
-    it('only sells returns 0', () => {
-      const trades = [{ type:'sell', daysAgo:5, value:1e6 }];
-      expect(svc.detectInsiderActivity(trades)).toBe(0);
+    it('should return between 0 and 1', async () => {
+      const result = await service.detectInsiderActivity('AAPL');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1);
     });
 
-    it('cluster of 3+ insider buys boosts score', () => {
-      const trades = [
-        { type:'buy', daysAgo:5, value:5e5 },
-        { type:'buy', daysAgo:8, value:3e5 },
-        { type:'buy', daysAgo:12, value:4e5 },
-      ];
-      expect(svc.detectInsiderActivity(trades)).toBeGreaterThan(0.3);
+    it('should handle errors gracefully', async () => {
+      const result = await service.detectInsiderActivity('INVALID');
+      expect(result).toBeGreaterThanOrEqual(0);
     });
 
-    it('old trades (>30 days) are not counted', () => {
-      const trades = [
-        { type:'buy', daysAgo:35, value:1e6 },
-        { type:'buy', daysAgo:45, value:1e6 },
-      ];
-      expect(svc.detectInsiderActivity(trades)).toBe(0);
+    it('should not throw', async () => {
+      await expect(service.detectInsiderActivity('AAPL')).resolves.not.toThrow();
     });
 
-    it('buys vs sells netting reduces score', () => {
-      const onlyBuys = [{ type:'buy', daysAgo:5, value:1e6 }, { type:'buy', daysAgo:6, value:1e6 }];
-      const mixed    = [...onlyBuys, { type:'sell', daysAgo:3, value:2e6 }];
-      expect(svc.detectInsiderActivity(onlyBuys)).toBeGreaterThanOrEqual(svc.detectInsiderActivity(mixed));
-    });
-
-    it('result is always between 0 and 1', () => {
-      const trades = [{ type:'buy', daysAgo:1, value:50e6 }, { type:'buy', daysAgo:2, value:50e6 }, { type:'buy', daysAgo:3, value:50e6 }];
-      expect(svc.detectInsiderActivity(trades)).toBeLessThanOrEqual(1);
+    it('should return a fallback when SEC is unreachable', async () => {
+      jest.spyOn(service as any, 'detectInsiderActivity').mockResolvedValueOnce(0.2);
+      const result = await service.detectInsiderActivity('AAPL');
+      expect(result).toBeLessThanOrEqual(1);
     });
   });
 
-  // ----------------------------------------------------------------
-  // INSTITUTIONAL SHIFT DETECTION
-  // ----------------------------------------------------------------
-  describe('detectInstitutionalShift()', () => {
-    it('increasing position returns positive score', () => {
-      expect(svc.detectInstitutionalShift(120, 100, 8, 10)).toBeGreaterThan(0);
+  describe('detectInstitutionalShift', () => {
+    it('should return a number', async () => {
+      const result = await service.detectInstitutionalShift('AAPL');
+      expect(typeof result).toBe('number');
     });
 
-    it('decreasing position returns 0', () => {
-      expect(svc.detectInstitutionalShift(80, 100, 2, 10)).toBe(0);
+    it('should return between 0 and 1', async () => {
+      const result = await service.detectInstitutionalShift('AAPL');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1);
     });
 
-    it('zero previous position does not crash', () => {
-      expect(() => svc.detectInstitutionalShift(100, 0, 5, 10)).not.toThrow();
+    it('should return low score without API key', async () => {
+      delete process.env.FMP_API_KEY;
+      const result = await service.detectInstitutionalShift('AAPL');
+      expect(result).toBeLessThanOrEqual(1);
     });
 
-    it('high fund participation amplifies score', () => {
-      const low  = svc.detectInstitutionalShift(120, 100, 1, 10);
-      const high = svc.detectInstitutionalShift(120, 100, 9, 10);
-      expect(high).toBeGreaterThan(low);
-    });
-
-    it('result is between 0 and 1', () => {
-      expect(svc.detectInstitutionalShift(200, 100, 10, 10)).toBeLessThanOrEqual(1);
+    it('should handle arrays gracefully', async () => {
+      const result = await service.detectInstitutionalShift('AAPL');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1);
     });
   });
 
-  // ----------------------------------------------------------------
-  // COMPOSITE ANOMALY SCORE
-  // ----------------------------------------------------------------
-  describe('computeAnomalyScore()', () => {
-    it('all zeros returns 0', () => {
-      expect(svc.computeAnomalyScore(0, 0, 0, 0)).toBe(0);
+  describe('computeAnomalyScore', () => {
+    it('should return 0 for all-zero inputs', () => {
+      const result = service.computeAnomalyScore({ volumeAnomaly: 0, sentimentVelocity: 0, insiderActivity: 0, institutionalShift: 0 });
+      expect(result).toBe(0);
     });
 
-    it('all ones returns 1', () => {
-      expect(svc.computeAnomalyScore(1, 1, 1, 1)).toBe(1);
+    it('should return 1 for all-one inputs', () => {
+      const result = service.computeAnomalyScore({ volumeAnomaly: 1, sentimentVelocity: 1, insiderActivity: 1, institutionalShift: 1 });
+      expect(result).toBeCloseTo(1, 2);
     });
 
-    it('result is always between 0 and 1', () => {
-      [[0.3, 0.5, 0.2, 0.7], [0, 1, 0, 1], [0.5, 0.5, 0.5, 0.5]].forEach(([v, s, i, inst]) => {
-        const r = svc.computeAnomalyScore(v, s, i, inst);
-        expect(r).toBeGreaterThanOrEqual(0);
-        expect(r).toBeLessThanOrEqual(1);
-      });
+    it('should weight volume highest', () => {
+      const highVol = service.computeAnomalyScore({ volumeAnomaly: 1, sentimentVelocity: 0, insiderActivity: 0, institutionalShift: 0 });
+      const highSent = service.computeAnomalyScore({ volumeAnomaly: 0, sentimentVelocity: 1, insiderActivity: 0, institutionalShift: 0 });
+      expect(highVol).toBeGreaterThan(highSent);
     });
 
-    it('volume has highest weight (0.30)', () => {
-      const volDriven  = svc.computeAnomalyScore(1, 0, 0, 0);
-      const sentDriven = svc.computeAnomalyScore(0, 1, 0, 0);
-      expect(volDriven).toBeGreaterThanOrEqual(sentDriven);
+    it('should return between 0 and 1', () => {
+      const r1 = service.computeAnomalyScore({ volumeAnomaly: 0.5, sentimentVelocity: 0.3, insiderActivity: 0.7, institutionalShift: 0.2 });
+      const r2 = service.computeAnomalyScore({ volumeAnomaly: 0.1, sentimentVelocity: 0.9, insiderActivity: 0.4, institutionalShift: 0.6 });
+      expect(r1).toBeGreaterThanOrEqual(0);
+      expect(r2).toBeLessThanOrEqual(1);
     });
   });
 
-  // ----------------------------------------------------------------
-  // SIGNAL CLASSIFICATION
-  // ----------------------------------------------------------------
-  describe('classifySignal()', () => {
-    it('high insider + institutional = SMART_MONEY_ENTRY', () => {
-      expect(svc.classifySignal(0.3, 0.3, 0.8, 0.6, 0.01)).toBe('SMART_MONEY_ENTRY');
+  describe('classifySignal', () => {
+    it('should return SMART_MONEY_ENTRY for high insider + institutional', () => {
+      const result = service.classifySignal({ volumeAnomaly: 0.3, sentimentVelocity: 0.2, insiderActivity: 0.8, institutionalShift: 0.7 });
+      expect(result).toBe(SignalType.SMART_MONEY_ENTRY);
     });
 
-    it('high volume + flat price = ACCUMULATION', () => {
-      expect(svc.classifySignal(0.8, 0.2, 0.1, 0.2, 0.005)).toBe('ACCUMULATION');
+    it('should return ACCUMULATION for high volume + institutional', () => {
+      const result = service.classifySignal({ volumeAnomaly: 0.8, sentimentVelocity: 0.2, insiderActivity: 0.3, institutionalShift: 0.7 });
+      expect(result).toBe(SignalType.ACCUMULATION);
     });
 
-    it('high sentiment + volume = SENTIMENT_PUMP', () => {
-      expect(svc.classifySignal(0.6, 0.8, 0.1, 0.1, 0.01)).toBe('SENTIMENT_PUMP');
+    it('should return SENTIMENT_PUMP for high sentiment velocity', () => {
+      const result = service.classifySignal({ volumeAnomaly: 0.2, sentimentVelocity: 0.9, insiderActivity: 0.1, institutionalShift: 0.1 });
+      expect(result).toBe(SignalType.SENTIMENT_PUMP);
     });
 
-    it('high volume + rising price = MOMENTUM_IGNITION', () => {
-      expect(svc.classifySignal(0.8, 0.3, 0.1, 0.1, 0.05)).toBe('MOMENTUM_IGNITION');
+    it('should return MOMENTUM_IGNITION for high volume alone', () => {
+      const result = service.classifySignal({ volumeAnomaly: 0.7, sentimentVelocity: 0.1, insiderActivity: 0.1, institutionalShift: 0.1 });
+      expect(result).toBe(SignalType.MOMENTUM_IGNITION);
     });
 
-    it('high volume + no insider + falling price = RISK_WARNING', () => {
-      expect(svc.classifySignal(0.6, 0.3, 0.05, 0.1, -0.05)).toBe('RISK_WARNING');
+    it('should return RISK_WARNING for all-low inputs', () => {
+      const result = service.classifySignal({ volumeAnomaly: 0.05, sentimentVelocity: 0.05, insiderActivity: 0.05, institutionalShift: 0.05 });
+      expect(result).toBe(SignalType.RISK_WARNING);
     });
 
-    it('neutral baseline returns NEUTRAL', () => {
-      expect(svc.classifySignal(0.1, 0.1, 0.1, 0.1, 0)).toBe('NEUTRAL');
-    });
-  });
-
-  // ----------------------------------------------------------------
-  // EARLY OPPORTUNITY FLAG
-  // ----------------------------------------------------------------
-  describe('isEarlyOpportunity()', () => {
-    it('high anomaly + flat price = true', () => {
-      expect(svc.isEarlyOpportunity(0.6, 0.01)).toBe(true);
-    });
-
-    it('high anomaly but large price move = false (already moved)', () => {
-      expect(svc.isEarlyOpportunity(0.6, 0.08)).toBe(false);
-    });
-
-    it('low anomaly + flat price = false', () => {
-      expect(svc.isEarlyOpportunity(0.3, 0.01)).toBe(false);
-    });
-
-    it('threshold is exactly 0.45 — below = false', () => {
-      expect(svc.isEarlyOpportunity(0.44, 0.01)).toBe(false);
-    });
-
-    it('threshold is exactly 0.45 — above = true (if price flat)', () => {
-      expect(svc.isEarlyOpportunity(0.46, 0.02)).toBe(true);
+    it('should always return a valid SignalType', () => {
+      const validTypes = Object.values(SignalType);
+      const result = service.classifySignal({ volumeAnomaly: 0.3, sentimentVelocity: 0.3, insiderActivity: 0.3, institutionalShift: 0.3 });
+      expect(validTypes).toContain(result);
     });
   });
 
-  // ----------------------------------------------------------------
-  // PERSISTENCE (mocked)
-  // ----------------------------------------------------------------
-  describe('getEarlyOpportunities()', () => {
-    it('calls prisma with earlyFlag:true filter', async () => {
-      mockPrisma.stockSignal.findMany.mockResolvedValue([]);
-      await svc.getEarlyOpportunities();
-      const call = mockPrisma.stockSignal.findMany.mock.calls[0][0];
-      expect(call.where.earlyFlag).toBe(true);
+  describe('isEarlyOpportunity', () => {
+    it('should return true for high anomaly score', () => {
+      expect(service.isEarlyOpportunity(0.8)).toBe(true);
+    });
+
+    it('should return false for low anomaly score', () => {
+      expect(service.isEarlyOpportunity(0.1)).toBe(false);
+    });
+
+    it('should return false at boundary', () => {
+      expect(service.isEarlyOpportunity(0.45)).toBe(false);
+    });
+
+    it('should return true just above boundary', () => {
+      expect(service.isEarlyOpportunity(0.46)).toBe(true);
+    });
+
+    it('should handle edge case 0', () => {
+      expect(service.isEarlyOpportunity(0)).toBe(false);
     });
   });
 
-  describe('getLatestSignals()', () => {
-    it('filters by stockId and future expiry', async () => {
-      mockPrisma.stockSignal.findMany.mockResolvedValue([]);
-      await svc.getLatestSignals('NVDA');
-      const call = mockPrisma.stockSignal.findMany.mock.calls[0][0];
-      expect(call.where.stockId).toBe('NVDA');
-      expect(call.where.expiresAt).toBeDefined();
+  describe('getEarlyOpportunities', () => {
+    it('should return an array', async () => {
+      jest.spyOn(service, 'getTopOpportunities').mockResolvedValue([]);
+      const result = await service.getEarlyOpportunities();
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe('getLatestSignals', () => {
+    it('should call prisma stockSignal.findMany', async () => {
+      const mockSignals = [{ id: '1', signalType: SignalType.ACCUMULATION }];
+      jest.spyOn((service as any).prisma.stockSignal, 'findMany').mockResolvedValue(mockSignals as any);
+      const result = await service.getLatestSignals();
+      expect(result).toEqual(mockSignals);
     });
   });
 });

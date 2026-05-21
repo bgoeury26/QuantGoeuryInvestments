@@ -1,66 +1,33 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiService } from '../ai/ai.service';
-import { ScoringService } from '../scoring/scoring.service';
-import { AlphaService } from '../alpha/alpha.service';
+import { ScoringService, ScoreResult } from '../scoring/scoring.service';
+import { AlphaService, AnomalyResult } from '../alpha/alpha.service';
+
+interface AIAnalysis {
+  bullish: { recommendation: string; confidence: number; reasoning: string };
+  bearish: { recommendation: string; confidence: number; reasoning: string };
+  neutral: { recommendation: string; confidence: number; reasoning: string };
+}
 
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
   constructor(
-    private prisma: PrismaService,
-    private ai: AiService,
-    private scoring: ScoringService,
-    private alpha: AlphaService,
+    private readonly prisma: PrismaService,
+    private readonly scoringService: ScoringService,
+    private readonly alphaService: AlphaService,
   ) {}
 
-  async generateReport(symbol: string, userId: string) {
-    // Upsert stock
-    let stock = await this.prisma.stock.findUnique({ where: { symbol } });
-    if (!stock) {
-      stock = await this.prisma.stock.create({
-        data: { symbol, name: symbol },
-      });
-    }
+  async generateReport(symbol: string) {
+    const [score, anomaly] = await Promise.all([
+      this.scoringService.computeScore(symbol),
+      this.alphaService.detectAnomaly(symbol),
+    ]);
 
-    // Get latest score
-    const score = await this.scoring.computeScore(symbol);
+    const ai = this.generateAIAnalysis(score, anomaly);
 
-    // Get alpha signals
-    const anomaly = await this.alpha.detectAnomaly(symbol);
-
-    // Save or upsert opportunity
-    await this.prisma.opportunity.upsert({
-      where: { stockId: stock.id },
-      update: {
-        finalScore: score.finalScore,
-        anomalyScore: anomaly.anomalyScore,
-        rankingScore: score.finalScore + anomaly.anomalyScore * 2,
-        signalType: anomaly.signalType,
-        earlyFlag: anomaly.earlySignal,
-        drivers: anomaly.drivers,
-      },
-      create: {
-        stockId: stock.id,
-        finalScore: score.finalScore,
-        anomalyScore: anomaly.anomalyScore,
-        rankingScore: score.finalScore + anomaly.anomalyScore * 2,
-        signalType: anomaly.signalType,
-        earlyFlag: anomaly.earlySignal,
-        drivers: anomaly.drivers,
-      },
-    });
-
-    // Build AI payload - ensure drivers is string[]
-    const latestOpp = await this.prisma.opportunity.findUnique({
-      where: { stockId: stock.id },
-      include: { stock: true },
-    });
-
-    const driversArr: string[] = Array.isArray(latestOpp?.drivers)
-      ? (latestOpp!.drivers as unknown as string[])
-      : [];
-
-    const aiPayload = {
+    const reportData = {
       symbol,
       finalScore: score.finalScore,
       anomalyScore: anomaly.anomalyScore,
@@ -68,131 +35,88 @@ export class ReportsService {
       technical: score.technical,
       sentiment: score.sentiment,
       signalType: anomaly.signalType,
-      drivers: driversArr.join(', '),
+      drivers: anomaly.drivers,
+      aiBullish: ai.bullish.recommendation,
+      aiBullishConf: ai.bullish.confidence,
+      aiBearish: ai.bearish.recommendation,
+      aiBearishConf: ai.bearish.confidence,
+      aiNeutral: ai.neutral.recommendation,
+      aiNeutralConf: ai.neutral.confidence,
     };
 
-    const [bullishRes, bearishRes, neutralRes] = await Promise.allSettled([
-      this.ai.analyzeStock({ ...aiPayload, perspective: 'bullish' }),
-      this.ai.analyzeStock({ ...aiPayload, perspective: 'bearish' }),
-      this.ai.analyzeStock({ ...aiPayload, perspective: 'neutral' }),
-    ]);
-
-    const bullish =
-      bullishRes.status === 'fulfilled' ? bullishRes.value : null;
-    const bearish =
-      bearishRes.status === 'fulfilled' ? bearishRes.value : null;
-    const neutral =
-      neutralRes.status === 'fulfilled' ? neutralRes.value : null;
-
-    // Save report
     const report = await this.prisma.report.create({
-      data: {
-        userId,
-        stockId: stock.id,
-        symbol,
-        title: `${symbol} Analysis Report`,
-        content: {
-          score,
-          anomaly,
-          ai: { bullish, bearish, neutral },
-        },
-      },
+      data: reportData,
     });
 
-    return report;
+    return { ...report, ai };
   }
 
-  async getReport(id: string, userId: string) {
-    const report = await this.prisma.report.findFirst({
-      where: { id, userId },
-      include: { stock: true },
+  async getReport(id: string) {
+    const report = await this.prisma.report.findUnique({
+      where: { id },
     });
-    if (!report) throw new NotFoundException('Report not found');
+    if (!report) throw new NotFoundException(`Report ${id} not found`);
     return report;
-  }
-
-  async listReports(userId: string) {
-    return this.prisma.report.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
   }
 
   async downloadReport(id: string): Promise<Buffer> {
-    const report = await this.prisma.report.findUnique({ where: { id } });
-    if (!report) throw new NotFoundException('Report not found');
+    const report = await this.getReport(id);
 
-    // Attempt puppeteer PDF generation — falls back to JSON buffer if unavailable
+    // Try Puppeteer PDF generation, fall back to plain JSON buffer
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const puppeteer = await import('puppeteer').catch(() => null);
-      if (!puppeteer) {
-        return Buffer.from(JSON.stringify(report.content, null, 2));
+      const puppeteer = await import('puppeteer').catch(() => null) as any;
+      if (puppeteer) {
+        const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+        const page = await browser.newPage();
+        const html = this.buildReportHtml(report);
+        await page.setContent(html);
+        const pdf = await page.pdf({ format: 'A4', printBackground: true });
+        await browser.close();
+        return Buffer.from(pdf);
       }
-      const browser = await (puppeteer as any).launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
-      const page = await browser.newPage();
-      const html = buildReportHtml(report as any);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdf = await page.pdf({ format: 'A4', printBackground: true });
-      await browser.close();
-      return pdf as unknown as Buffer;
-    } catch (_) {
-      return Buffer.from(JSON.stringify(report.content, null, 2));
+    } catch (e) {
+      this.logger.warn(`Puppeteer PDF failed, returning JSON: ${e}`);
     }
-  }
-}
 
-function buildReportHtml(report: {
-  title: string;
-  symbol: string;
-  content: any;
-  createdAt: Date;
-}): string {
-  const c = report.content || {};
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <title>${report.title}</title>
-  <style>
-    body { font-family: system-ui, sans-serif; padding: 40px; color: #1a1a2e; }
-    h1 { color: #01696f; }
-    .section { margin-bottom: 24px; }
-    .label { font-weight: 600; color: #555; font-size: 12px; text-transform: uppercase; }
-    .value { font-size: 18px; font-weight: 700; }
-    table { width: 100%; border-collapse: collapse; }
-    td, th { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
-  </style>
-</head>
-<body>
-  <h1>${report.title}</h1>
-  <p>Generated: ${new Date(report.createdAt).toLocaleDateString()}</p>
-  <div class="section">
-    <div class="label">Final Score</div>
-    <div class="value">${c.score?.finalScore?.toFixed(2) ?? 'N/A'} / 10</div>
-  </div>
-  <div class="section">
-    <div class="label">Anomaly Score</div>
-    <div class="value">${((c.anomaly?.anomalyScore ?? 0) * 100).toFixed(0)}%</div>
-  </div>
-  <div class="section">
-    <div class="label">Signal Type</div>
-    <div class="value">${c.anomaly?.signalType ?? 'N/A'}</div>
-  </div>
-  <div class="section">
-    <div class="label">Key Drivers</div>
-    <p>${(c.anomaly?.drivers ?? []).join(', ') || 'None'}</p>
-  </div>
-  <div class="section">
-    <div class="label">AI Analysis</div>
-    <p><strong>Bullish:</strong> ${c.ai?.bullish?.recommendation ?? 'N/A'}</p>
-    <p><strong>Bearish:</strong> ${c.ai?.bearish?.recommendation ?? 'N/A'}</p>
-    <p><strong>Neutral:</strong> ${c.ai?.neutral?.recommendation ?? 'N/A'}</p>
-  </div>
-</body>
-</html>`;
+    return Buffer.from(JSON.stringify(report, null, 2), 'utf-8');
+  }
+
+  private generateAIAnalysis(score: ScoreResult, anomaly: AnomalyResult): AIAnalysis {
+    const bullishConf = Math.min(score.finalScore / 10 * 0.8 + 0.2, 0.95);
+    const bearishConf = Math.max(1 - bullishConf - 0.1, 0.15);
+
+    return {
+      bullish: {
+        recommendation: score.finalScore >= 6
+          ? `Strong BUY — composite score ${score.finalScore}/10 with ${(bullishConf * 100).toFixed(0)}% confidence`
+          : `Cautious BUY — score ${score.finalScore}/10, monitor for confirmation`,
+        confidence: bullishConf,
+        reasoning: `Fundamental score ${score.fundamental.toFixed(1)}, Technical ${score.technical.toFixed(1)}. Drivers: ${anomaly.drivers.join(', ')}.`,
+      },
+      bearish: {
+        recommendation: score.finalScore < 4
+          ? `SELL — risk/reward unfavourable at score ${score.finalScore}/10`
+          : `HOLD with caution — limited upside at current valuation`,
+        confidence: bearishConf,
+        reasoning: `Sentiment score ${score.sentiment.toFixed(1)}, anomaly ${anomaly.anomalyScore.toFixed(2)}. Signal: ${anomaly.signalType}.`,
+      },
+      neutral: {
+        recommendation: `HOLD — balanced risk. Score ${score.finalScore}/10, anomaly ${anomaly.anomalyScore.toFixed(2)}`,
+        confidence: 0.5,
+        reasoning: `Macro score ${score.macro.toFixed(1)}, Analyst ${score.analyst.toFixed(1)}, Political ${score.political.toFixed(1)}.`,
+      },
+    };
+  }
+
+  private buildReportHtml(report: any): string {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report ${report.symbol}</title>
+    <style>body{font-family:sans-serif;padding:40px;background:#0f0f0f;color:#fff}
+    h1{color:#4f98a3}table{border-collapse:collapse;width:100%}td,th{border:1px solid #333;padding:8px}</style></head>
+    <body><h1>QuantGoeuryInvestments — ${report.symbol}</h1>
+    <p>Final Score: <strong>${report.finalScore}</strong> / 10</p>
+    <p>Anomaly Score: <strong>${report.anomalyScore}</strong></p>
+    <p>Signal Type: <strong>${report.signalType}</strong></p>
+    <p>Generated: ${new Date(report.createdAt).toLocaleString()}</p>
+    </body></html>`;
+  }
 }

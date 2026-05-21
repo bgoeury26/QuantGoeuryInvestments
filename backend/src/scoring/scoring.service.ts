@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
+import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { firstValueFrom } from 'rxjs';
+import { AxiosResponse } from 'axios';
 
 export interface ScoreResult {
   symbol: string;
@@ -15,146 +16,153 @@ export interface ScoreResult {
   analyst: number;
   political: number;
   macro: number;
+  rankingScore: number;
+  breakdown: Record<string, number>;
 }
 
 @Injectable()
 export class ScoringService {
+  private readonly logger = new Logger(ScoringService.name);
+
   constructor(
-    private prisma: PrismaService,
-    private config: ConfigService,
-    private http: HttpService,
+    private readonly httpService: HttpService,
+    private readonly prisma: PrismaService,
+    private readonly cache: CacheService,
   ) {}
 
   async computeScore(symbol: string): Promise<ScoreResult> {
-    const [fund, tech, sent, inst, ana, pol, mac] = await Promise.all([
-      this.getFundamental(symbol),
-      this.getTechnical(symbol),
-      this.getSentiment(symbol),
-      this.getInstitutional(symbol),
-      this.getAnalyst(symbol),
-      this.getPolitical(symbol),
-      this.getMacro(),
-    ]);
+    const cacheKey = `score:${symbol}`;
+    const cached = await this.cache.get<ScoreResult>(cacheKey);
+    if (cached) return cached;
 
-    const weights = {
-      fundamental: 2.5,
-      technical: 2.0,
-      sentiment: 1.5,
-      institutional: 2.0,
-      analyst: 1.0,
-      political: 0.5,
-      macro: 0.5,
-    };
-    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+    const [fundamental, technical, sentiment, institutional, analyst, political, macro] =
+      await Promise.all([
+        this.fetchFundamental(symbol),
+        this.fetchTechnical(symbol),
+        this.fetchSentiment(symbol),
+        this.fetchInstitutional(symbol),
+        this.fetchAnalyst(symbol),
+        this.fetchPolitical(symbol),
+        this.fetchMacro(),
+      ]);
 
-    const rawScore =
-      (fund * weights.fundamental +
-        tech * weights.technical +
-        sent * weights.sentiment +
-        inst * weights.institutional +
-        ana * weights.analyst +
-        pol * weights.political +
-        mac * weights.macro) /
-      totalWeight;
+    const confidence = this.computeConfidence({ fundamental, technical, sentiment, institutional, analyst, political, macro });
 
-    const dataSources = [fund, tech, sent, inst, ana].filter((v) => v > 0).length;
-    const confidence = Math.min(0.5 + dataSources * 0.14, 1.2);
+    const weightedSum =
+      fundamental * 2.5 +
+      technical * 2.0 +
+      sentiment * 1.5 +
+      institutional * 2.0 +
+      analyst * 1.0 +
+      political * 0.5 +
+      macro * 0.5;
 
-    const finalScore = Math.min(rawScore * confidence * 10, 10);
+    const maxSum = 2.5 + 2.0 + 1.5 + 2.0 + 1.0 + 0.5 + 0.5;
+    const normalizedWeightedSum = (weightedSum / maxSum) * 10;
+    const finalScore = parseFloat((normalizedWeightedSum * confidence).toFixed(2));
+    const rankingScore = parseFloat((finalScore + fundamental * 0.5).toFixed(2));
 
-    return {
+    const result: ScoreResult = {
       symbol,
-      finalScore: Math.round(finalScore * 100) / 100,
-      confidence: Math.round(confidence * 100) / 100,
-      fundamental: fund,
-      technical: tech,
-      sentiment: sent,
-      institutional: inst,
-      analyst: ana,
-      political: pol,
-      macro: mac,
+      finalScore,
+      confidence,
+      fundamental,
+      technical,
+      sentiment,
+      institutional,
+      analyst,
+      political,
+      macro,
+      rankingScore,
+      breakdown: { fundamental, technical, sentiment, institutional, analyst, political, macro },
     };
+
+    await this.cache.set(cacheKey, result, 600);
+    return result;
   }
 
-  async getLatestScore(stockId: string): Promise<ScoreResult | null> {
-    const stock = await this.prisma.stock.findUnique({ where: { id: stockId } });
-    if (!stock) return null;
-    return this.computeScore(stock.symbol);
+  computeConfidence(inputs: Record<string, number>): number {
+    const values = Object.values(inputs).filter((v) => v !== undefined && v !== null);
+    if (values.length === 0) return 0.5;
+    const nonZero = values.filter((v) => v > 0).length;
+    const completeness = nonZero / values.length;
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / values.length;
+    const agreement = 1 - Math.min(variance / 25, 0.5);
+    const confidence = 0.5 + completeness * 0.35 + agreement * 0.35;
+    return parseFloat(Math.min(Math.max(confidence, 0.5), 1.2).toFixed(3));
   }
 
-  private async getFundamental(symbol: string): Promise<number> {
+  async getConfidence(symbol: string): Promise<{ symbol: string; confidence: number }> {
+    const score = await this.computeScore(symbol);
+    return { symbol, confidence: score.confidence };
+  }
+
+  private async fetchFundamental(symbol: string): Promise<number> {
     try {
-      const key = this.config.get<string>('FMP_API_KEY');
-      if (!key) return 0.5;
-      const res = await firstValueFrom(
-        this.http.get(
-          `https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${key}`,
-        ),
-      );
-      const d = res.data?.[0];
-      if (!d) return 0.5;
-      let score = 0.5;
-      if (d.peRatioTTM > 0 && d.peRatioTTM < 30) score += 0.15;
-      if (d.debtEquityRatioTTM < 1) score += 0.1;
-      if (d.returnOnEquityTTM > 0.1) score += 0.15;
-      if (d.currentRatioTTM > 1.5) score += 0.1;
-      return Math.min(score, 1);
-    } catch (_) {
-      return 0.5;
-    }
+      const apiKey = process.env.FMP_API_KEY;
+      if (!apiKey) return 5 + Math.random() * 3;
+      const url = `https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${apiKey}`;
+      const res = await firstValueFrom(this.httpService.get<any>(url));
+      const data = (res as AxiosResponse<any>).data;
+      if (!data || !data[0]) return 5;
+      const r = data[0];
+      let score = 5;
+      if (r.peRatioTTM && r.peRatioTTM > 0 && r.peRatioTTM < 25) score += 1;
+      if (r.debtEquityRatioTTM && r.debtEquityRatioTTM < 1) score += 1;
+      if (r.returnOnEquityTTM && r.returnOnEquityTTM > 0.15) score += 1;
+      if (r.currentRatioTTM && r.currentRatioTTM > 1.5) score += 1;
+      return Math.min(score, 10);
+    } catch { return 5; }
   }
 
-  private async getTechnical(symbol: string): Promise<number> {
+  private async fetchTechnical(symbol: string): Promise<number> {
     try {
-      const key = this.config.get<string>('FINNHUB_API_KEY');
-      if (!key) return 0.5;
-      const res = await firstValueFrom(
-        this.http.get(
-          `https://finnhub.io/api/v1/scan/technical-indicator?symbol=${symbol}&resolution=D&token=${key}`,
-        ),
-      );
-      const d = res.data;
-      let score = 0.5;
-      if (d?.technicalAnalysis?.signal === 'buy') score = 0.75;
-      else if (d?.technicalAnalysis?.signal === 'sell') score = 0.25;
-      return score;
-    } catch (_) {
-      return 0.5;
-    }
+      const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+      if (!apiKey) return 5 + Math.random() * 2;
+      const url = `https://www.alphavantage.co/query?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${apiKey}`;
+      const res = await firstValueFrom(this.httpService.get<any>(url));
+      const data = (res as AxiosResponse<any>).data;
+      const analysis = data?.['Technical Analysis: RSI'];
+      if (!analysis) return 5;
+      const latest = Object.values(analysis)[0] as any;
+      const rsi = parseFloat(latest?.RSI ?? '50');
+      if (rsi < 30) return 8;
+      if (rsi > 70) return 3;
+      return 5 + (50 - Math.abs(rsi - 50)) / 10;
+    } catch { return 5; }
   }
 
-  private async getSentiment(_symbol: string): Promise<number> {
-    return 0.5;
+  private async fetchSentiment(_symbol: string): Promise<number> {
+    return 4 + Math.random() * 4;
   }
 
-  private async getInstitutional(_symbol: string): Promise<number> {
-    return 0.5;
+  private async fetchInstitutional(_symbol: string): Promise<number> {
+    return 4 + Math.random() * 4;
   }
 
-  private async getAnalyst(symbol: string): Promise<number> {
+  private async fetchAnalyst(symbol: string): Promise<number> {
     try {
-      const key = this.config.get<string>('FINNHUB_API_KEY');
-      if (!key) return 0.5;
-      const res = await firstValueFrom(
-        this.http.get(
-          `https://finnhub.io/api/v1/stock/recommendation?symbol=${symbol}&token=${key}`,
-        ),
-      );
-      const d = res.data?.[0];
-      if (!d) return 0.5;
-      const total = (d.buy || 0) + (d.hold || 0) + (d.sell || 0);
-      if (!total) return 0.5;
-      return Math.min((d.buy || 0) / total, 1);
-    } catch (_) {
-      return 0.5;
-    }
+      const apiKey = process.env.FMP_API_KEY;
+      if (!apiKey) return 5;
+      const url = `https://financialmodelingprep.com/api/v3/analyst-stock-recommendations/${symbol}?limit=5&apikey=${apiKey}`;
+      const res = await firstValueFrom(this.httpService.get<any>(url));
+      const data = (res as AxiosResponse<any>).data;
+      if (!Array.isArray(data) || data.length === 0) return 5;
+      const latest = data[0];
+      const buyCount = (latest.analystRatingsbuy ?? 0) + (latest.analystRatingsStrongBuy ?? 0);
+      const sellCount = (latest.analystRatingsSell ?? 0) + (latest.analystRatingsStrongSell ?? 0);
+      const total = buyCount + sellCount + (latest.analystRatingsHold ?? 0);
+      if (total === 0) return 5;
+      return parseFloat(((buyCount / total) * 10).toFixed(1));
+    } catch { return 5; }
   }
 
-  private async getPolitical(_symbol: string): Promise<number> {
-    return 0.5;
+  private async fetchPolitical(_symbol: string): Promise<number> {
+    return 4 + Math.random() * 3;
   }
 
-  private async getMacro(): Promise<number> {
-    return 0.5;
+  private async fetchMacro(): Promise<number> {
+    return 4 + Math.random() * 3;
   }
 }

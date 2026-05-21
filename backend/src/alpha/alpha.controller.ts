@@ -1,19 +1,24 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { AlphaService } from './alpha.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-@Controller('alpha')
 @UseGuards(JwtAuthGuard)
+@Controller('alpha')
 export class AlphaController {
-  constructor(private readonly svc: AlphaService) {}
+  constructor(private readonly alphaService: AlphaService) {}
 
-  @Get(':symbol')
-  async byId(@Param('symbol') symbol: string) {
-    return this.svc.getAnomalyBySymbol(symbol);
+  @Get('signals/:symbol')
+  async getSignals(@Param('symbol') symbol: string) {
+    return this.alphaService.analyzeSymbol(symbol);
   }
 
-  @Get('signals/recent')
-  async recent() {
-    return this.svc.getRecentSignals();
+  @Get('opportunities')
+  async getOpportunities(@Query('limit') limit?: string) {
+    return this.alphaService.getTopOpportunities(limit ? parseInt(limit) : 10);
+  }
+
+  @Get('anomaly/:symbol')
+  async getAnomaly(@Param('symbol') symbol: string) {
+    return this.alphaService.detectAnomaly(symbol);
   }
 }

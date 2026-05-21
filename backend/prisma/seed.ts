@@ -1,105 +1,87 @@
-import { PrismaClient, SignalType } from '@prisma/client';
+import { PrismaClient, UserRole, UserStatus, SignalType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
-const DEMO_SIGNALS: Array<{
-  symbol: string;
-  name: string;
-  signal: string;
-  strength: number;
-  earlyFlag: boolean;
-  drivers: string[];
-}> = [
-  {
-    symbol: 'NVDA',
-    name: 'NVIDIA Corporation',
-    signal: 'ACCUMULATION',
-    strength: 0.87,
-    earlyFlag: true,
-    drivers: ['Volume spike +340%', 'Insider cluster buy', 'Institutional rotation'],
-  },
-  {
-    symbol: 'AAPL',
-    name: 'Apple Inc.',
-    signal: 'SMART_MONEY_ENTRY',
-    strength: 0.72,
-    earlyFlag: false,
-    drivers: ['13F filings increase', 'Analyst upgrades x3'],
-  },
-  {
-    symbol: 'TSLA',
-    name: 'Tesla Inc.',
-    signal: 'MOMENTUM_IGNITION',
-    strength: 0.65,
-    earlyFlag: true,
-    drivers: ['Reddit mentions +520%', 'News velocity burst'],
-  },
-  {
-    symbol: 'MSFT',
-    name: 'Microsoft Corporation',
-    signal: 'SMART_MONEY_ENTRY',
-    strength: 0.79,
-    earlyFlag: false,
-    drivers: ['Price-volume divergence', 'Institutional accumulation'],
-  },
-  {
-    symbol: 'AMZN',
-    name: 'Amazon.com Inc.',
-    signal: 'ACCUMULATION',
-    strength: 0.68,
-    earlyFlag: false,
-    drivers: ['Congressional trades detected', 'Volume above avg'],
-  },
-];
-
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // Admin user
-  const adminHash = await bcrypt.hash('admin123!', 10);
+  // Create admin user
+  const adminPassword = await bcrypt.hash('admin123!', 12);
   const admin = await prisma.user.upsert({
     where: { email: 'goeurybenjamin@gmail.com' },
     update: {},
     create: {
       email: 'goeurybenjamin@gmail.com',
-      passwordHash: adminHash,
+      password: adminPassword,
       name: 'Benjamin Goeury',
-      status: 'APPROVED',
-      isAdmin: true,
+      role: UserRole.ADMIN,
+      status: UserStatus.APPROVED,
     },
   });
-  console.log('✅ Admin user:', admin.email);
+  console.log('✅ Admin user created:', admin.email);
 
-  // Demo stocks + signals
-  for (const d of DEMO_SIGNALS) {
+  // Create test user
+  const userPassword = await bcrypt.hash('user123!', 12);
+  const testUser = await prisma.user.upsert({
+    where: { email: 'test@quantgoeury.com' },
+    update: {},
+    create: {
+      email: 'test@quantgoeury.com',
+      password: userPassword,
+      name: 'Test User',
+      role: UserRole.USER,
+      status: UserStatus.APPROVED,
+    },
+  });
+  console.log('✅ Test user created:', testUser.email);
+
+  // Seed stocks
+  const stocks = [
+    { symbol: 'AAPL', name: 'Apple Inc.', sector: 'Technology', marketCap: 3000000000000 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', sector: 'Technology', marketCap: 2800000000000 },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology', marketCap: 1900000000000 },
+    { symbol: 'AMZN', name: 'Amazon.com Inc.', sector: 'Consumer Cyclical', marketCap: 1800000000000 },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', sector: 'Technology', marketCap: 2200000000000 },
+    { symbol: 'META', name: 'Meta Platforms Inc.', sector: 'Technology', marketCap: 1200000000000 },
+    { symbol: 'TSLA', name: 'Tesla Inc.', sector: 'Consumer Cyclical', marketCap: 800000000000 },
+    { symbol: 'BRK.B', name: 'Berkshire Hathaway', sector: 'Financial Services', marketCap: 900000000000 },
+    { symbol: 'JPM', name: 'JPMorgan Chase', sector: 'Financial Services', marketCap: 600000000000 },
+    { symbol: 'JNJ', name: 'Johnson & Johnson', sector: 'Healthcare', marketCap: 450000000000 },
+  ];
+
+  for (const stockData of stocks) {
     const stock = await prisma.stock.upsert({
-      where: { symbol: d.symbol },
-      update: { name: d.name },
-      create: { symbol: d.symbol, name: d.name, sector: 'Technology' },
+      where: { symbol: stockData.symbol },
+      update: {},
+      create: stockData,
     });
 
-    // Cast signal string to SignalType enum
+    // Seed a sample signal for each stock
     await prisma.stockSignal.create({
       data: {
-        stockId: stock.id,
-        signalType: d.signal as SignalType,
-        strength: d.strength,
-        earlyFlag: d.earlyFlag,
-        drivers: d.drivers,
-        expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+        stock: { connect: { id: stock.id } },
+        signalType: SignalType.ACCUMULATION,
+        anomalyScore: Math.random() * 0.8 + 0.1,
+        volumeAnomaly: Math.random() * 0.9,
+        sentimentVelocity: Math.random() * 0.7,
+        insiderActivity: Math.random() * 0.5,
+        institutionalShift: Math.random() * 0.6,
+        isEarlyOpportunity: Math.random() > 0.6,
+        priceAtSignal: Math.random() * 500 + 50,
       },
     });
-
-    console.log(`✅ Seeded ${d.symbol}`);
   }
+  console.log('✅ Stocks seeded:', stocks.length);
 
-  console.log('✅ Seed complete');
+  console.log('🎉 Seeding complete!');
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('❌ Seed error:', e);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

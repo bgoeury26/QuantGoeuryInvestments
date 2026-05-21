@@ -1,49 +1,50 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { User } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { UserStatus } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { email } });
-  }
-
-  async findById(id: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { id } });
-  }
-
-  async create(data: {
-    email: string;
-    password: string;
-    name: string;
-  }): Promise<User> {
-    const passwordHash = await bcrypt.hash(data.password, 10);
-    return this.prisma.user.create({
-      data: {
-        email: data.email,
-        passwordHash,
-        name: data.name,
-        status: 'PENDING',
-      },
+  async findAll() {
+    return this.prisma.user.findMany({
+      select: { id: true, email: true, name: true, role: true, status: true, createdAt: true },
     });
   }
 
-  async updateStatus(
-    id: string,
-    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED',
-  ): Promise<User> {
+  async findOne(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, name: true, role: true, status: true, createdAt: true },
+    });
+    if (!user) throw new NotFoundException(`User ${id} not found`);
+    return user;
+  }
+
+  async updateStatus(id: string, status: UserStatus) {
     return this.prisma.user.update({
       where: { id },
       data: { status },
+      select: { id: true, email: true, name: true, role: true, status: true },
     });
   }
 
-  async listAll(): Promise<User[]> {
-    return this.prisma.user.findMany({
+  async addToWatchlist(userId: string, symbol: string) {
+    return this.prisma.watchlistItem.create({
+      data: { userId, symbol },
+    });
+  }
+
+  async getWatchlist(userId: string) {
+    return this.prisma.watchlistItem.findMany({
+      where: { userId },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async removeFromWatchlist(userId: string, id: string) {
+    return this.prisma.watchlistItem.delete({
+      where: { id, userId },
     });
   }
 }
