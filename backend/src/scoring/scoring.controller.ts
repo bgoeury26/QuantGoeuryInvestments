@@ -1,19 +1,25 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ScoringService } from './scoring.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@UseGuards(JwtAuthGuard)
 @Controller('scoring')
+@UseGuards(JwtAuthGuard)
 export class ScoringController {
   constructor(private readonly scoringService: ScoringService) {}
 
-  @Get(':symbol')
-  async getScore(@Param('symbol') symbol: string) {
+  @Get('score/:symbol')
+  getScore(@Param('symbol') symbol: string) {
     return this.scoringService.computeScore(symbol);
   }
 
-  @Get(':symbol/confidence')
+  @Get('top')
+  getTopOpportunities() {
+    return this.scoringService.getTopOpportunities();
+  }
+
+  @Get('confidence/:symbol')
   async getConfidence(@Param('symbol') symbol: string) {
-    return this.scoringService.getConfidence(symbol);
+    const score = await this.scoringService.computeScore(symbol);
+    return { symbol, confidence: score.confidence };
   }
 }
