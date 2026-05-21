@@ -3,10 +3,29 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService, ScoreResult } from '../scoring/scoring.service';
 import { AlphaService, AnomalyResult } from '../alpha/alpha.service';
 
-interface AIAnalysis {
-  bullish: { recommendation: string; confidence: number; reasoning: string };
-  bearish: { recommendation: string; confidence: number; reasoning: string };
-  neutral: { recommendation: string; confidence: number; reasoning: string };
+export interface AIAnalystView {
+  recommendation: string;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface AIAnalysis {
+  bullish: AIAnalystView;
+  bearish: AIAnalystView;
+  neutral: AIAnalystView;
+}
+
+export interface ReportPayload {
+  id: string;
+  userId: string;
+  symbol: string;
+  title: string;
+  content: unknown;
+  pdfPath: string | null;
+  createdAt: Date;
+  ai: AIAnalysis;
+  score: ScoreResult;
+  anomaly: AnomalyResult;
 }
 
 @Injectable()
@@ -19,7 +38,7 @@ export class ReportsService {
     private readonly alphaService: AlphaService,
   ) {}
 
-  async generateReport(symbol: string, userId: string) {
+  async generateReport(symbol: string, userId: string): Promise<ReportPayload> {
     const [score, anomaly] = await Promise.all([
       this.scoringService.computeScore(symbol),
       this.alphaService.detectAnomaly(symbol),
@@ -27,7 +46,6 @@ export class ReportsService {
 
     const ai = this.generateAIAnalysis(score, anomaly);
 
-    // Report model: id, userId, symbol, title, content (Json), pdfPath, createdAt
     const report = await this.prisma.report.create({
       data: {
         user: { connect: { id: userId } },
@@ -47,11 +65,7 @@ export class ReportsService {
           drivers: anomaly.drivers,
           confidence: anomaly.confidence,
           isEarlyOpportunity: anomaly.isEarlyOpportunity,
-          ai: {
-            bullish: ai.bullish,
-            bearish: ai.bearish,
-            neutral: ai.neutral,
-          },
+          ai: { bullish: ai.bullish, bearish: ai.bearish, neutral: ai.neutral },
         } as any,
       },
     });
@@ -76,9 +90,7 @@ export class ReportsService {
     const report = await this.getReport(id);
 
     try {
-      // Dynamic import — puppeteer is optional; if not installed, falls back to JSON
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const puppeteer = await import('puppeteer' as any).catch(() => null) as any;
+      const puppeteer = await (import as any)('puppeteer').catch(() => null);
       if (puppeteer) {
         const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
         const page = await browser.newPage();

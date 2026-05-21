@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Param, Body, Res, UseGuards, Request } from '@nestjs/common';
 import { Response } from 'express';
-import { ReportsService } from './reports.service';
+import { ReportsService, ReportPayload } from './reports.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -9,7 +9,10 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Post('generate')
-  async generateReport(@Body() body: { symbol: string }, @Request() req: any) {
+  async generateReport(
+    @Body() body: { symbol: string },
+    @Request() req: any,
+  ): Promise<ReportPayload> {
     return this.reportsService.generateReport(body.symbol, req.user.sub);
   }
 
