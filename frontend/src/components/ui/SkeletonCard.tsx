@@ -1,8 +1,14 @@
-export function SkeletonLine({ w = 'w-full', h = 'h-4' }: { w?: string; h?: string }) {
-  return <div className={`skeleton rounded ${w} ${h}`} />;
+import React from 'react';
+
+function SkeletonLine({ w, h }: { w?: string; h?: string }) {
+  return <div className={`skeleton rounded ${w ?? 'w-full'} ${h ?? 'h-3'}`} />;
 }
 
-export default function SkeletonCard({ rows = 4 }: { rows?: number }) {
+export default function SkeletonCard({
+  rows = 3,
+}: {
+  rows?: number;
+}) {
   return (
     <div className="card p-5 space-y-3">
       <SkeletonLine w="w-1/3" h="h-4" />

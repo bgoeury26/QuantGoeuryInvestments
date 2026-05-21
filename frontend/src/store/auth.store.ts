@@ -1,77 +1,74 @@
-// Canonical auth store — single source of truth
-// auth.store.ts is the primary; authStore.ts re-exports for backward compat
-'use client';
 import { create } from 'zustand';
-import Cookies from 'js-cookie';
-import api from '@/lib/api';
+import api from '../lib/api';
 
-export interface User {
-  id:     string;
-  email:  string;
-  name:   string;
-  role:   'USER' | 'ADMIN';
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  status: string;
+  isAdmin: boolean;
+  createdAt: string;
 }
 
 interface AuthState {
-  user:            User | null;
-  isAuthenticated: boolean;
-  isLoading:       boolean;
-  error:           string | null;
-  login:     (email: string, password: string) => Promise<void>;
-  signup:    (email: string, password: string, name: string) => Promise<void>;
-  logout:    () => void;
-  fetchMe:   () => Promise<void>;
-  clearError:() => void;
+  user: User | null;
+  token: string | null;
+  isLoading: boolean;
+  setUser: (user: User | null) => void;
+  setToken: (token: string | null) => void;
+  logout: () => void;
+  fetchMe: () => Promise<void>;
+}
+
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const v = document.cookie.match(`(^|;)\\s*${name}\\s*=\\s*([^;]+)`);
+  return v ? v.pop() ?? null : null;
+}
+
+function setCookie(name: string, value: string, days = 7) {
+  const expires = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie = `${name}=${value}; expires=${expires}; path=/; SameSite=Lax`;
+}
+
+function deleteCookie(name: string) {
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user:            null,
-  isAuthenticated: false,
-  isLoading:       false,
-  error:           null,
+  user: null,
+  token: null,
+  isLoading: false,
 
-  login: async (email, password) => {
-    set({ isLoading: true, error: null });
-    try {
-      const { data } = await api.post('/auth/login', { email, password });
-      Cookies.set('access_token', data.access_token, { expires: 7, sameSite: 'strict' });
-      set({ user: data.user, isAuthenticated: true, isLoading: false });
-    } catch (e: any) {
-      const msg = e?.response?.data?.message ?? 'Login failed';
-      set({ error: msg, isLoading: false });
-      throw new Error(msg);
-    }
-  },
+  setUser: (user) => set({ user }),
 
-  signup: async (email, password, name) => {
-    set({ isLoading: true, error: null });
-    try {
-      await api.post('/auth/register', { email, password, name });
-      set({ isLoading: false });
-    } catch (e: any) {
-      const msg = e?.response?.data?.message ?? 'Signup failed';
-      set({ error: msg, isLoading: false });
-      throw new Error(msg);
+  setToken: (token) => {
+    set({ token });
+    if (token) {
+      setCookie('auth_token', token);
+    } else {
+      deleteCookie('auth_token');
     }
   },
 
   logout: () => {
-    Cookies.remove('access_token');
-    set({ user: null, isAuthenticated: false });
-    if (typeof window !== 'undefined') window.location.href = '/login';
+    deleteCookie('auth_token');
+    set({ user: null, token: null });
+    window.location.href = '/login';
   },
 
   fetchMe: async () => {
-    set({ isLoading: true });
+    const token = getCookie('auth_token');
+    if (!token) return;
     try {
-      const { data } = await api.get('/users/me');
-      set({ user: data, isAuthenticated: true, isLoading: false });
-    } catch {
-      Cookies.remove('access_token');
-      set({ user: null, isAuthenticated: false, isLoading: false });
+      set({ isLoading: true });
+      const res = await api.get('/auth/me');
+      set({ user: res.data, token });
+    } catch (_) {
+      deleteCookie('auth_token');
+      set({ user: null, token: null });
+    } finally {
+      set({ isLoading: false });
     }
   },
-
-  clearError: () => set({ error: null }),
 }));

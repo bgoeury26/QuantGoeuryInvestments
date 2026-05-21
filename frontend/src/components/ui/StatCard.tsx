@@ -1,37 +1,63 @@
-import { cn } from '@/lib/utils';
-import { LucideIcon } from 'lucide-react';
+import React from 'react';
+import type { LucideIcon } from 'lucide-react';
 
-interface StatCardProps {
+function cn(...classes: (string | false | null | undefined)[]) {
+  return classes.filter(Boolean).join(' ');
+}
+
+const COLOR_MAP: Record<string, string> = {
+  primary: 'bg-primary/10 text-primary',
+  success: 'bg-success/10 text-success',
+  warning: 'bg-warning/10 text-warning',
+  danger: 'bg-danger/10 text-danger',
+  muted: 'bg-surface-2 text-muted',
+};
+
+export default function StatCard({
+  label,
+  value,
+  subValue,
+  icon: Icon,
+  color = 'primary',
+  trend,
+}: {
   label: string;
   value: string | number;
   subValue?: string;
   icon?: LucideIcon;
-  trend?: 'up' | 'down' | 'neutral';
-  color?: 'default' | 'success' | 'danger' | 'warning' | 'primary';
-}
-
-export default function StatCard({ label, value, subValue, icon: Icon, trend, color = 'default' }: StatCardProps) {
-  const trendColor = trend === 'up' ? 'text-success' : trend === 'down' ? 'text-danger' : 'text-muted';
-  const iconBg = {
-    default:  'bg-faint/20 text-muted',
-    success:  'bg-success/15 text-success',
-    danger:   'bg-danger/15 text-danger',
-    warning:  'bg-warning/15 text-warning',
-    primary:  'bg-primary/15 text-primary',
-  }[color];
-
+  color?: string;
+  trend?: 'up' | 'down';
+}) {
   return (
     <div className="stat-card">
       <div className="flex items-start justify-between">
         <p className="text-xs text-muted">{label}</p>
         {Icon && (
-          <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center', iconBg)}>
-            <Icon className="w-3.5 h-3.5" />
+          <div
+            className={cn(
+              'w-7 h-7 rounded-lg flex items-center justify-center',
+              COLOR_MAP[color] ?? COLOR_MAP.primary,
+            )}
+          >
+            <Icon className="w-4 h-4" />
           </div>
         )}
       </div>
-      <p className="text-xl font-semibold text-text tabular-nums mt-1">{value}</p>
-      {subValue && <p className={cn('text-xs', trendColor)}>{subValue}</p>}
+      <p className="text-2xl font-bold text-text tabular-nums mt-2">{value}</p>
+      {subValue && (
+        <p
+          className={cn(
+            'text-xs mt-1',
+            trend === 'up'
+              ? 'text-success'
+              : trend === 'down'
+              ? 'text-danger'
+              : 'text-muted',
+          )}
+        >
+          {subValue}
+        </p>
+      )}
     </div>
   );
 }

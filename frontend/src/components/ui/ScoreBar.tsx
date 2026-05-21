@@ -1,30 +1,50 @@
-import { cn, scoreBarColor, scoreColor } from '@/lib/utils';
+import React from 'react';
 
-interface ScoreBarProps {
-  score: number;
-  max?: number;
-  label?: string;
-  showValue?: boolean;
-  size?: 'sm' | 'md';
+function cn(...classes: (string | false | null | undefined)[]) {
+  return classes.filter(Boolean).join(' ');
 }
 
-export default function ScoreBar({ score, max = 10, label, showValue = true, size = 'sm' }: ScoreBarProps) {
-  const pct = Math.min(100, (score / max) * 100);
-  const color = scoreBarColor(score);
-  const textColor = scoreColor(score);
+function scoreBarColor(score: number): string {
+  if (score >= 7) return 'bg-success';
+  if (score >= 5) return 'bg-warning';
+  return 'bg-danger';
+}
+
+function scoreColor(score: number): string {
+  if (score >= 7) return 'text-success';
+  if (score >= 5) return 'text-warning';
+  return 'text-danger';
+}
+
+export default function ScoreBar({
+  score,
+  max = 10,
+  showLabel = true,
+}: {
+  score: number;
+  max?: number;
+  showLabel?: boolean;
+}) {
+  const pct = Math.min((score / max) * 100, 100);
   return (
     <div className="w-full">
-      {(label || showValue) && (
-        <div className="flex items-center justify-between mb-1">
-          {label && <span className="text-xs text-muted">{label}</span>}
-          {showValue && <span className={cn('text-xs font-mono font-semibold', textColor)}>{score.toFixed(1)}</span>}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 bg-surface-2 rounded-full overflow-hidden">
+          <div
+            className={cn('h-full rounded-full transition-all', scoreBarColor(score))}
+            style={{ width: `${pct}%` }}
+          />
         </div>
-      )}
-      <div className={cn('w-full rounded-full bg-faint/30', size === 'sm' ? 'h-1.5' : 'h-2')}>
-        <div
-          className={cn('h-full rounded-full transition-all duration-500', color)}
-          style={{ width: `${pct}%` }}
-        />
+        {showLabel && (
+          <span
+            className={cn(
+              'text-xs font-semibold w-8 text-right tabular-nums',
+              scoreColor(score),
+            )}
+          >
+            {score.toFixed(1)}
+          </span>
+        )}
       </div>
     </div>
   );

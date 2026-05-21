@@ -1,11 +1,14 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { ScoringService } from './scoring.service';
+import { ScoringService, ScoreResult } from './scoring.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@ApiTags('scoring') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('scoring')
+@Controller('scoring')
+@UseGuards(JwtAuthGuard)
 export class ScoringController {
-  constructor(private s: ScoringService) {}
-  @Get('stock/:id') score(@Param('id') id:string) { return this.s.getLatestScore(id); }
-  @Get('opportunities') top() { return this.s.getTopOpportunities(10); }
+  constructor(private readonly s: ScoringService) {}
+
+  @Get(':stockId')
+  async score(@Param('stockId') id: string): Promise<ScoreResult | null> {
+    return this.s.getLatestScore(id);
+  }
 }

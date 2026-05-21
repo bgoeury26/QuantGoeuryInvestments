@@ -1,51 +1,49 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { User } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  findByEmail(email: string) {
+  async findByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
-  findById(id: string) {
-    return this.prisma.user.findUnique({
-      where:  { id },
-      select: { id: true, email: true, name: true, role: true, status: true, createdAt: true },
+  async findById(id: string): Promise<User | null> {
+    return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  async create(data: {
+    email: string;
+    password: string;
+    name: string;
+  }): Promise<User> {
+    const passwordHash = await bcrypt.hash(data.password, 10);
+    return this.prisma.user.create({
+      data: {
+        email: data.email,
+        passwordHash,
+        name: data.name,
+        status: 'PENDING',
+      },
     });
   }
 
-  create(data: { email: string; password: string; name: string }) {
-    return this.prisma.user.create({ data });
-  }
-
-  updateStatus(id: string, status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED') {
-    return this.prisma.user.update({ where: { id }, data: { status } });
-  }
-
-  // ── Watchlist ─────────────────────────────────────────────────────────────
-
-  async getWatchlist(userId: string) {
-    const entries = await this.prisma.watchlistEntry.findMany({
-      where:   { userId },
-      include: { stock: true },
-      orderBy: { addedAt: 'desc' },
-    });
-    return entries.map(e => e.stock);
-  }
-
-  async addToWatchlist(userId: string, stockId: string) {
-    return this.prisma.watchlistEntry.upsert({
-      where:  { userId_stockId: { userId, stockId } },
-      update: {},
-      create: { userId, stockId },
+  async updateStatus(
+    id: string,
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED',
+  ): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { status },
     });
   }
 
-  async removeFromWatchlist(userId: string, stockId: string) {
-    return this.prisma.watchlistEntry.deleteMany({
-      where: { userId, stockId },
+  async listAll(): Promise<User[]> {
+    return this.prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
     });
   }
 }

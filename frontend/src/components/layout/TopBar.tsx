@@ -1,6 +1,7 @@
 'use client';
+
+import React, { useState } from 'react';
 import { Bell, Search } from 'lucide-react';
-import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function TopBar({ title }: { title: string }) {
@@ -9,7 +10,10 @@ export default function TopBar({ title }: { title: string }) {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (query.trim()) router.push(`/analysis/${query.trim().toUpperCase()}`);
+    if (query.trim()) {
+      router.push(`/analysis/${query.trim().toUpperCase()}`);
+      setQuery('');
+    }
   };
 
   return (
@@ -19,8 +23,10 @@ export default function TopBar({ title }: { title: string }) {
         <form onSubmit={handleSearch} className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
           <input
-            value={query} onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search ticker..." className="input pl-8 h-8 w-48 text-xs"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search ticker..."
+            className="input pl-8 h-8 w-48 text-xs"
           />
         </form>
         <button className="relative p-2 rounded-lg text-muted hover:text-text hover:bg-surface-2 transition-all">

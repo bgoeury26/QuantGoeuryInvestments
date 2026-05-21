@@ -1,34 +1,24 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OpportunitiesService } from './opportunities.service';
-import { AlphaService } from '../alpha/alpha.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@ApiTags('opportunities')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('opportunities')
+@UseGuards(JwtAuthGuard)
 export class OpportunitiesController {
-  constructor(
-    private opps: OpportunitiesService,
-    private alpha: AlphaService,
-  ) {}
+  constructor(private readonly svc: OpportunitiesService) {}
 
-  /** GET /opportunities/top?limit=10 — dynamically ranked opportunities */
   @Get('top')
-  async getTop(@Query('limit') limit = '10') {
-    return this.opps.getTopOpportunities(parseInt(limit));
+  async getTop(@Query('limit') limit = 10) {
+    return this.svc.getTopOpportunities(Number(limit));
   }
 
-  /** GET /opportunities/early — early signal opportunities only */
   @Get('early')
-  getEarly() {
-    return this.alpha.getEarlyOpportunities();
+  async getEarly() {
+    return this.svc.getEarlySignals();
   }
 
-  /** GET /opportunities/signals/recent — recent signals for dashboard */
-  @Get('signals/recent')
-  recentSignals(@Query('limit') limit = '20') {
-    return this.alpha.getRecentSignals(parseInt(limit));
+  @Get('signals')
+  async recentSignals(@Query('limit') limit = 20) {
+    return this.svc.getRecentSignals(Number(limit));
   }
 }

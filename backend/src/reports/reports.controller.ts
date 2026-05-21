@@ -1,29 +1,50 @@
-import { Controller, Get, Post, Param, Request, Res, UseGuards, HttpCode } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Param,
+  Res,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { Response } from 'express';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ReportsService } from './reports.service';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@ApiTags('Reports')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('reports')
+@UseGuards(JwtAuthGuard)
 export class ReportsController {
-  constructor(private svc: ReportsService) {}
-
-  @Get()
-  list(@Request() req: any) { return this.svc.listReports(req.user.sub); }
+  constructor(private readonly svc: ReportsService) {}
 
   @Post(':symbol')
-  @HttpCode(200)
-  async generate(@Param('symbol') symbol: string, @Request() req: any) {
+  async generate(
+    @Param('symbol') symbol: string,
+    @Request() req: any,
+  ) {
     return this.svc.generateReport(symbol.toUpperCase(), req.user.sub);
   }
 
-  @Get(':id/download')
-  async download(@Param('id') id: string, @Res() res: Response) {
+  @Get()
+  async list(@Request() req: any) {
+    return this.svc.listReports(req.user.sub);
+  }
+
+  @Get(':id')
+  async getOne(@Param('id') id: string, @Request() req: any) {
+    return this.svc.getReport(id, req.user.sub);
+  }
+
+  @Get(':id/pdf')
+  async downloadPdf(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
     const buf = await this.svc.downloadReport(id);
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="report-${id}.pdf"` });
-    res.send(buf);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="report-${id}.pdf"`,
+      'Content-Length': buf.length,
+    });
+    res.end(buf);
   }
 }

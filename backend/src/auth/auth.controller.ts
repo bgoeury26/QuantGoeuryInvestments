@@ -1,29 +1,38 @@
-import { Controller, Post, Get, Body, Request, UseGuards, HttpCode } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  Get,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { UsersService } from '../users/users.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { User } from '@prisma/client';
 
-@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private auth: AuthService, private users: UsersService) {}
+  constructor(private auth: AuthService) {}
 
-  @Post('signup')
-  signup(@Body() dto: { email: string; password: string; name: string }) {
-    return this.auth.register(dto);
+  @Post('register')
+  async register(
+    @Body() body: { email: string; password: string; name: string },
+  ) {
+    return this.auth.register(body.email, body.password, body.name);
   }
 
   @Post('login')
-  @HttpCode(200)
-  login(@Body() dto: { email: string; password: string }) {
-    return this.auth.login(dto);
+  @HttpCode(HttpStatus.OK)
+  async login(@Body() body: { email: string; password: string }) {
+    return this.auth.login(body.email, body.password);
   }
 
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @Get('me')
-  me(@Request() req: any) {
-    return this.users.findById(req.user.sub);
+  async me(@Request() req: any): Promise<Partial<User>> {
+    const { passwordHash, ...user } = req.user as User;
+    return user;
   }
 }
