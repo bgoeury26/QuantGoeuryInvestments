@@ -30,12 +30,12 @@ export class AlphaService {
   ) {}
 
   async analyzeSymbol(symbol: string): Promise<AnomalyResult> {
-    const cacheKey = `alpha:${symbol}`;
-    const cached = await this.cache.get<AnomalyResult>(cacheKey);
-    if (cached) return cached;
+    // Use cache with endpoint+params pattern matching CacheService signature
+    const cached = await this.cache.get('alpha:analyze', { symbol });
+    if (cached) return cached as AnomalyResult;
 
     const result = await this.detectAnomaly(symbol);
-    await this.cache.set(cacheKey, result, 300);
+    await this.cache.set('alpha:analyze', { symbol }, result, 300);
     return result;
   }
 
@@ -59,7 +59,7 @@ export class AlphaService {
       institutionalShift,
     });
 
-    const isEarlyOpportunity = this.isEarlyOpportunity(anomalyScore, symbol);
+    const isEarlyOpportunity = this.isEarlyOpportunity(anomalyScore);
     const drivers = this.buildDriversList(volumeAnomaly, sentimentVelocity, insiderActivity, institutionalShift);
 
     const result: AnomalyResult = {
@@ -75,7 +75,8 @@ export class AlphaService {
       drivers,
     };
 
-    // Persist signal
+    // Persist signal using only schema-defined fields:
+    // StockSignal: id, stockId, signalType, strength, description, drivers, earlyFlag, detectedAt, expiresAt
     try {
       const stock = await this.prisma.stock.findUnique({ where: { symbol } });
       if (stock) {
@@ -83,13 +84,10 @@ export class AlphaService {
           data: {
             stock: { connect: { id: stock.id } },
             signalType,
-            anomalyScore,
-            volumeAnomaly,
-            sentimentVelocity,
-            insiderActivity,
-            institutionalShift,
-            isEarlyOpportunity,
-            priceAtSignal: 0,
+            strength: anomalyScore,
+            earlyFlag: isEarlyOpportunity,
+            description: `Anomaly detected: ${signalType}`,
+            drivers: drivers as any,
           },
         });
       }
@@ -113,7 +111,9 @@ export class AlphaService {
       const volumes = dates.map((d) => parseFloat(series[d]['5. volume']));
       const recent = volumes[0];
       const avg = volumes.slice(1).reduce((a, b) => a + b, 0) / 30;
-      const std = Math.sqrt(volumes.slice(1).map((v) => Math.pow(v - avg, 2)).reduce((a, b) => a + b, 0) / 30);
+      const std = Math.sqrt(
+        volumes.slice(1).map((v) => Math.pow(v - avg, 2)).reduce((a, b) => a + b, 0) / 30,
+      );
       const zScore = std > 0 ? (recent - avg) / std : 0;
       return Math.min(Math.max(zScore / 5, 0), 1);
     } catch {
@@ -141,7 +141,8 @@ export class AlphaService {
 
   async detectInsiderActivity(symbol: string): Promise<number> {
     try {
-      const url = `https://efts.sec.gov/LATEST/search-index?q=%22${symbol}%22&dateRange=custom&startdt=${this.thirtyDaysAgo()}&forms=4`;
+      const thirtyAgo = this.thirtyDaysAgo();
+      const url = `https://efts.sec.gov/LATEST/search-index?q=%22${symbol}%22&dateRange=custom&startdt=${thirtyAgo}&forms=4`;
       const response = await firstValueFrom(this.httpService.get<any>(url));
       const data = (response as AxiosResponse<any>).data;
       const hits = data?.hits?.hits ?? [];
@@ -199,7 +200,7 @@ export class AlphaService {
     return SignalType.ACCUMULATION;
   }
 
-  isEarlyOpportunity(anomalyScore: number, _symbol?: string): boolean {
+  isEarlyOpportunity(anomalyScore: number): boolean {
     return anomalyScore > 0.45;
   }
 
@@ -214,9 +215,7 @@ export class AlphaService {
         // skip
       }
     }
-    return results
-      .sort((a, b) => b.anomalyScore - a.anomalyScore)
-      .slice(0, limit);
+    return results.sort((a, b) => b.anomalyScore - a.anomalyScore).slice(0, limit);
   }
 
   async getEarlyOpportunities(): Promise<AnomalyResult[]> {
@@ -227,7 +226,7 @@ export class AlphaService {
   async getLatestSignals(limit = 20) {
     return this.prisma.stockSignal.findMany({
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { detectedAt: 'desc' },
       include: { stock: true },
     });
   }

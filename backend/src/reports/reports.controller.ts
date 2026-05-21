@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Res, UseGuards, Request } from '@nestjs/common';
 import { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -9,8 +9,13 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Post('generate')
-  async generateReport(@Body() body: { symbol: string }) {
-    return this.reportsService.generateReport(body.symbol);
+  async generateReport(@Body() body: { symbol: string }, @Request() req: any) {
+    return this.reportsService.generateReport(body.symbol, req.user.sub);
+  }
+
+  @Get()
+  async getUserReports(@Request() req: any) {
+    return this.reportsService.getUserReports(req.user.sub);
   }
 
   @Get(':id')

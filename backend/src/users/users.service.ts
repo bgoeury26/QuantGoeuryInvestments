@@ -21,6 +21,14 @@ export class UsersService {
     return user;
   }
 
+  // Alias used by JwtStrategy
+  async findById(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, name: true, role: true, status: true },
+    });
+  }
+
   async updateStatus(id: string, status: UserStatus) {
     return this.prisma.user.update({
       where: { id },
@@ -29,22 +37,25 @@ export class UsersService {
     });
   }
 
-  async addToWatchlist(userId: string, symbol: string) {
-    return this.prisma.watchlistItem.create({
-      data: { userId, symbol },
+  // Watchlist — uses WatchlistEntry (userId + stockId)
+  // To add by symbol: first resolve stock, then create entry
+  async addToWatchlist(userId: string, stockId: string) {
+    return this.prisma.watchlistEntry.create({
+      data: { userId, stockId },
     });
   }
 
   async getWatchlist(userId: string) {
-    return this.prisma.watchlistItem.findMany({
+    return this.prisma.watchlistEntry.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      include: { stock: true },
+      orderBy: { addedAt: 'desc' },
     });
   }
 
-  async removeFromWatchlist(userId: string, id: string) {
-    return this.prisma.watchlistItem.delete({
-      where: { id, userId },
+  async removeFromWatchlist(userId: string, entryId: string) {
+    return this.prisma.watchlistEntry.delete({
+      where: { id: entryId, userId },
     });
   }
 }

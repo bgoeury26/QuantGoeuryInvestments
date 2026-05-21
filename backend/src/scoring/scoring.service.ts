@@ -31,9 +31,9 @@ export class ScoringService {
   ) {}
 
   async computeScore(symbol: string): Promise<ScoreResult> {
-    const cacheKey = `score:${symbol}`;
-    const cached = await this.cache.get<ScoreResult>(cacheKey);
-    if (cached) return cached;
+    // CacheService.get(endpoint, params) — no generics
+    const cached = await this.cache.get('scoring:compute', { symbol });
+    if (cached) return cached as ScoreResult;
 
     const [fundamental, technical, sentiment, institutional, analyst, political, macro] =
       await Promise.all([
@@ -46,7 +46,15 @@ export class ScoringService {
         this.fetchMacro(),
       ]);
 
-    const confidence = this.computeConfidence({ fundamental, technical, sentiment, institutional, analyst, political, macro });
+    const confidence = this.computeConfidence({
+      fundamental,
+      technical,
+      sentiment,
+      institutional,
+      analyst,
+      political,
+      macro,
+    });
 
     const weightedSum =
       fundamental * 2.5 +
@@ -77,7 +85,8 @@ export class ScoringService {
       breakdown: { fundamental, technical, sentiment, institutional, analyst, political, macro },
     };
 
-    await this.cache.set(cacheKey, result, 600);
+    // CacheService.set(endpoint, params, data, ttlSeconds)
+    await this.cache.set('scoring:compute', { symbol }, result, 600);
     return result;
   }
 

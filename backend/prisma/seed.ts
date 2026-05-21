@@ -57,18 +57,19 @@ async function main() {
       create: stockData,
     });
 
-    // Seed a sample signal for each stock
+    // Seed a sample signal — use only schema fields
+    const anomalyScore = Math.random() * 0.8 + 0.1;
     await prisma.stockSignal.create({
       data: {
         stock: { connect: { id: stock.id } },
         signalType: SignalType.ACCUMULATION,
-        anomalyScore: Math.random() * 0.8 + 0.1,
-        volumeAnomaly: Math.random() * 0.9,
-        sentimentVelocity: Math.random() * 0.7,
-        insiderActivity: Math.random() * 0.5,
-        institutionalShift: Math.random() * 0.6,
-        isEarlyOpportunity: Math.random() > 0.6,
-        priceAtSignal: Math.random() * 500 + 50,
+        strength: anomalyScore,
+        earlyFlag: anomalyScore > 0.45,
+        description: 'Seeded signal',
+        drivers: [
+          'Volume spike detected',
+          'Institutional accumulation',
+        ],
       },
     });
   }
