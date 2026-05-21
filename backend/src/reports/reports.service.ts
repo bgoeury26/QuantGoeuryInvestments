@@ -36,7 +36,6 @@ export class ReportsService {
 
     const topSignal = Array.isArray(signals) && signals.length > 0 ? signals[0] : null;
 
-    // Safely cast drivers from JsonValue to string[]
     const drivers: string[] = Array.isArray(topSignal?.drivers)
       ? (topSignal.drivers as unknown[]).filter((d): d is string => typeof d === 'string')
       : [];
@@ -52,7 +51,7 @@ export class ReportsService {
       drivers,
     };
 
-    const aiRes = await Promise.allSettled([this.ai.analyzeStock(aiPayload)]);
+    const aiRes  = await Promise.allSettled([this.ai.analyzeStock(aiPayload)]);
     const analysis = aiRes[0].status === 'fulfilled' ? aiRes[0].value : null;
 
     const content = {
@@ -95,34 +94,32 @@ export class ReportsService {
     return fs.readFileSync(report.pdfPath);
   }
 
-  /** Public download — no user ownership check (used by admin download endpoint) */
   async downloadReport(id: string): Promise<Buffer> {
     const report = await this.prisma.report.findUnique({ where: { id } });
     if (!report) throw new Error('Report not found');
     if (report.pdfPath && fs.existsSync(report.pdfPath)) {
       return fs.readFileSync(report.pdfPath);
     }
-    // Fallback: regenerate PDF from stored content
     try {
-      const content = report.content as any;
-      return await this.generatePdf(report.symbol, content);
+      return await this.generatePdf(report.symbol, report.content as any);
     } catch {
-      // Last resort: return minimal PDF placeholder
       return Buffer.from(`Report ${id} — PDF not available`, 'utf-8');
     }
   }
 
-  // ── PDF generation (Puppeteer — optional, graceful fallback) ─────────────
+  // ── PDF generation ──────────────────────────────────────────────────
 
   private async generatePdf(symbol: string, content: any): Promise<Buffer> {
-    // Dynamic import with graceful fallback if puppeteer not installed
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let puppeteerMod: any;
     try {
-      puppeteerMod = await import('puppeteer');
+      // Dynamic require avoids TS module-not-found error when puppeteer is optional
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      puppeteerMod = require('puppeteer');
     } catch {
-      throw new Error('puppeteer not installed');
+      throw new Error('puppeteer not installed — skipping PDF generation');
     }
-    const browser = await puppeteerMod.default.launch({
+    const browser = await puppeteerMod.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
@@ -152,24 +149,17 @@ export class ReportsService {
       `<tr><td>${s.signalType}</td><td>${(s.strength * 100).toFixed(0)}%</td><td>${s.earlyFlag ? '⚡ Early' : '—'}</td></tr>`
     ).join('');
     const ai = content.analysis;
-    const scoreVal = score?.finalScore ?? 0;
+    const scoreVal   = score?.finalScore ?? 0;
     const scoreColor = scoreVal >= 7 ? '#16a34a' : scoreVal >= 5 ? '#d97706' : '#dc2626';
     return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  body { font-family: 'Helvetica Neue', sans-serif; color: #1a1a1a; background: #fff; font-size: 13px; }
-  h1 { font-size: 22px; margin-bottom: 4px; }
-  h2 { font-size: 14px; margin: 18px 0 6px; border-bottom: 1px solid #e5e5e5; padding-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-  th, td { padding: 5px 8px; text-align: left; border: 1px solid #e5e5e5; }
-  th { background: #f5f5f5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .score { font-size: 28px; font-weight: 700; color: ${scoreColor}; }
-  .footer { margin-top: 32px; font-size: 10px; color: #999; border-top: 1px solid #e5e5e5; padding-top: 8px; }
-</style>
-</head>
-<body>
+<html><head><meta charset="UTF-8"><style>
+  body{font-family:'Helvetica Neue',sans-serif;color:#1a1a1a;background:#fff;font-size:13px}
+  h1{font-size:22px;margin-bottom:4px}h2{font-size:14px;margin:18px 0 6px;border-bottom:1px solid #e5e5e5;padding-bottom:4px}
+  table{width:100%;border-collapse:collapse;margin-bottom:12px}th,td{padding:5px 8px;text-align:left;border:1px solid #e5e5e5}
+  th{background:#f5f5f5;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .score{font-size:28px;font-weight:700;color:${scoreColor}}
+  .footer{margin-top:32px;font-size:10px;color:#999;border-top:1px solid #e5e5e5;padding-top:8px}
+</style></head><body>
   <h1>${symbol} — Research Report</h1>
   <p style="color:#666">Generated ${content.generatedAt}</p>
   <h2>Composite Score</h2>
@@ -184,7 +174,6 @@ export class ReportsService {
     ${ai.bearish?.analysis ? `<p><strong>🐻 Bearish (${ai.bearish.recommendation}):</strong> ${ai.bearish.analysis}</p>` : ''}
     ${ai.neutral?.analysis ? `<p><strong>⚖️ Neutral (${ai.neutral.recommendation}):</strong> ${ai.neutral.analysis}</p>` : ''}` : ''}
   <div class="footer">QuantGoeuryInvestments — For informational purposes only. Not financial advice.</div>
-</body>
-</html>`;
+</body></html>`;
   }
 }
