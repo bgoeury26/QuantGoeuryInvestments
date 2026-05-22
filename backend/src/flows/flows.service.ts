@@ -21,7 +21,6 @@ export class FlowsService {
     const cacheKey = `flows:institutional:${upper}`;
     const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
-
     if (!this.fhKey) return { symbol: upper, holders: [] };
 
     const data = await axios.get('https://finnhub.io/api/v1/stock/institutional-ownership', {
@@ -49,7 +48,6 @@ export class FlowsService {
     const cacheKey = `flows:insider:${upper}`;
     const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
-
     if (!this.fhKey) return { symbol: upper, trades: [] };
 
     const data = await axios.get('https://finnhub.io/api/v1/stock/insider-transactions', {
@@ -70,7 +68,6 @@ export class FlowsService {
     return result;
   }
 
-  // Called by controller as getPolitical(symbol)
   async getPolitical(symbol: string) {
     return {
       symbol: symbol.toUpperCase(),
@@ -79,7 +76,6 @@ export class FlowsService {
     };
   }
 
-  // Called by controller as getSummary(symbol)
   async getSummary(symbol: string) {
     const upper = symbol.toUpperCase();
     const [inst, insider] = await Promise.all([
@@ -87,8 +83,8 @@ export class FlowsService {
       this.getInsider(upper),
     ]);
 
-    const instBuys   = inst.holders.filter((h: any) => h.changeType === 'BUY').length;
-    const instSells  = inst.holders.filter((h: any) => h.changeType === 'SELL').length;
+    const instBuys    = inst.holders.filter((h: any) => h.changeType === 'BUY').length;
+    const instSells   = inst.holders.filter((h: any) => h.changeType === 'SELL').length;
     const insiderBuys  = insider.trades.filter((t: any) => t.transactionType === 'BUY').length;
     const insiderSells = insider.trades.filter((t: any) => t.transactionType === 'SELL').length;
 
@@ -102,16 +98,18 @@ export class FlowsService {
     };
   }
 
-  // Called by controller as getGlobalSummary() — no args
-  async getGlobalSummary() {
-    const stocks = await this.prisma.stock.findMany({ take: 20, orderBy: { symbol: 'asc' } });
+  // Controller passes an optional string[] of symbols
+  async getGlobalSummary(symbols: string[] = ['AAPL','NVDA','MSFT','TSLA','META','AMZN','GOOGL','JPM','V','SPY']) {
+    const results = await Promise.allSettled(
+      symbols.map(sym => this.getSummary(sym))
+    );
     return {
-      trackedSymbols: stocks.map(s => s.symbol),
-      note: 'Use /flows/:sym/summary for per-symbol flow analysis.',
+      summaries: results
+        .filter(r => r.status === 'fulfilled')
+        .map(r => (r as PromiseFulfilledResult<any>).value),
     };
   }
 
-  // Called by controller as getRecentInsiderTrades(limit)
   async getRecentInsiderTrades(limit = 50) {
     const cacheKey = `flows:insider:all:${limit}`;
     const cached = await this.cache.get(cacheKey);
@@ -135,7 +133,6 @@ export class FlowsService {
     return result;
   }
 
-  // Called by controller as getRecentPolitical()
   async getRecentPolitical() {
     return { trades: [], note: 'Political trading data not available from current data providers.' };
   }
