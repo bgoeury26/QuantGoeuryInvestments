@@ -57,12 +57,12 @@ export class FlowsService {
     }).then(r => r.data).catch(() => null);
 
     const trades = (data?.data ?? []).slice(0, 30).map((t: any) => ({
-      name:             t.name,
-      transactionType:  t.transactionType === 'P' ? 'BUY' : t.transactionType === 'S' ? 'SELL' : t.transactionType,
-      shares:           t.share,
-      value:            t.value,
-      transactionDate:  t.transactionDate,
-      filingDate:       t.filingDate,
+      name:            t.name,
+      transactionType: t.transactionType === 'P' ? 'BUY' : t.transactionType === 'S' ? 'SELL' : t.transactionType,
+      shares:          t.share,
+      value:           t.value,
+      transactionDate: t.transactionDate,
+      filingDate:      t.filingDate,
     }));
 
     const result = { symbol: upper, trades };
@@ -70,8 +70,8 @@ export class FlowsService {
     return result;
   }
 
+  // Called by controller as getPolitical(symbol)
   async getPolitical(symbol: string) {
-    // Finnhub doesn't have political trading — return structured placeholder
     return {
       symbol: symbol.toUpperCase(),
       trades: [],
@@ -79,15 +79,16 @@ export class FlowsService {
     };
   }
 
-  async getFlowsSummary(symbol: string) {
+  // Called by controller as getSummary(symbol)
+  async getSummary(symbol: string) {
     const upper = symbol.toUpperCase();
     const [inst, insider] = await Promise.all([
       this.getInstitutional(upper),
       this.getInsider(upper),
     ]);
 
-    const instBuys  = inst.holders.filter((h: any) => h.changeType === 'BUY').length;
-    const instSells = inst.holders.filter((h: any) => h.changeType === 'SELL').length;
+    const instBuys   = inst.holders.filter((h: any) => h.changeType === 'BUY').length;
+    const instSells  = inst.holders.filter((h: any) => h.changeType === 'SELL').length;
     const insiderBuys  = insider.trades.filter((t: any) => t.transactionType === 'BUY').length;
     const insiderSells = insider.trades.filter((t: any) => t.transactionType === 'SELL').length;
 
@@ -101,8 +102,8 @@ export class FlowsService {
     };
   }
 
+  // Called by controller as getGlobalSummary() — no args
   async getGlobalSummary() {
-    // Aggregate across tracked stocks from DB
     const stocks = await this.prisma.stock.findMany({ take: 20, orderBy: { symbol: 'asc' } });
     return {
       trackedSymbols: stocks.map(s => s.symbol),
@@ -110,12 +111,12 @@ export class FlowsService {
     };
   }
 
-  async getAllInsiderTrades() {
-    const cacheKey = 'flows:insider:all';
+  // Called by controller as getRecentInsiderTrades(limit)
+  async getRecentInsiderTrades(limit = 50) {
+    const cacheKey = `flows:insider:all:${limit}`;
     const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
 
-    // Pull insider trades for top tracked symbols
     const stocks = await this.prisma.stock.findMany({ take: 10, orderBy: { symbol: 'asc' } });
     const allTrades: any[] = [];
 
@@ -125,14 +126,17 @@ export class FlowsService {
     }
 
     const result = {
-      trades: allTrades.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()).slice(0, 50),
+      trades: allTrades
+        .sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime())
+        .slice(0, limit),
     };
 
     await this.cache.set(cacheKey, result, 3600);
     return result;
   }
 
-  async getAllPolitical() {
+  // Called by controller as getRecentPolitical()
+  async getRecentPolitical() {
     return { trades: [], note: 'Political trading data not available from current data providers.' };
   }
 }
