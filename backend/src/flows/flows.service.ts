@@ -1,147 +1,138 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CacheService } from '../cache/cache.service';
 import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
 
 @Injectable()
 export class FlowsService {
-  constructor(private cache: CacheService, private prisma: PrismaService) {}
+  private readonly logger = new Logger(FlowsService.name);
 
-  private ago(days: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() - days);
-    return d.toISOString().slice(0, 10);
-  }
+  constructor(
+    private readonly config: ConfigService,
+    private readonly cache: CacheService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  private get fhKey() { return this.config.get<string>('FINNHUB_API_KEY'); }
 
   async getInstitutional(symbol: string) {
-    const c = await this.cache.get('institutional', { symbol });
-    if (c) return c;
-    try {
-      const { data } = await axios.get(
-        `https://efts.sec.gov/LATEST/search-index?q=%22${symbol}%22&dateRange=custom&startdt=${this.ago(90)}&enddt=${this.ago(0)}&forms=13F-HR`,
-        { headers: { 'User-Agent': 'QuantGoeuryInvestments research@quant.com' }, timeout: 10000 },
-      );
-      const r = { filings: data?.hits?.hits?.slice(0, 20) ?? [], total: data?.hits?.total?.value ?? 0 };
-      await this.cache.set('institutional', { symbol }, r, 86400);
-      return r;
-    } catch { return { filings: [], total: 0 }; }
+    const upper = symbol.toUpperCase();
+    const cacheKey = `flows:institutional:${upper}`;
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    if (!this.fhKey) return { symbol: upper, holders: [] };
+
+    const data = await axios.get('https://finnhub.io/api/v1/stock/institutional-ownership', {
+      params: { symbol: upper, token: this.fhKey },
+    }).then(r => r.data).catch(() => null);
+
+    const result = {
+      symbol: upper,
+      holders: (data?.ownership ?? []).slice(0, 20).map((h: any) => ({
+        name:         h.name,
+        sharesHeld:   h.share,
+        changeShares: h.change,
+        changeType:   h.change > 0 ? 'BUY' : h.change < 0 ? 'SELL' : 'HOLD',
+        percentOwned: h.sharePercent,
+        reportDate:   h.reportDate,
+      })),
+    };
+
+    await this.cache.set(cacheKey, result, 3600 * 6);
+    return result;
   }
 
   async getInsider(symbol: string) {
-    const c = await this.cache.get('insider', { symbol });
-    if (c) return c;
-    try {
-      const { data } = await axios.get(
-        `https://efts.sec.gov/LATEST/search-index?q=%22${symbol}%22&forms=4&dateRange=custom&startdt=${this.ago(90)}&enddt=${this.ago(0)}`,
-        { headers: { 'User-Agent': 'QuantGoeuryInvestments research@quant.com' }, timeout: 10000 },
-      );
-      const trades = (data?.hits?.hits ?? []).slice(0, 30).map((h: any) => ({
-        filingId:   h._id,
-        company:    h._source?.display_names?.[0] ?? symbol,
-        filer:      h._source?.period_of_report ?? '',
-        filedAt:    h._source?.file_date ?? '',
-        formType:   '4',
-        url:        `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${h._source?.entity_id ?? ''}&type=4&dateb=&owner=include&count=10`,
-      }));
-      const r = { trades };
-      await this.cache.set('insider', { symbol }, r, 14400);
-      return r;
-    } catch { return { trades: [] }; }
+    const upper = symbol.toUpperCase();
+    const cacheKey = `flows:insider:${upper}`;
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    if (!this.fhKey) return { symbol: upper, trades: [] };
+
+    const data = await axios.get('https://finnhub.io/api/v1/stock/insider-transactions', {
+      params: { symbol: upper, token: this.fhKey },
+    }).then(r => r.data).catch(() => null);
+
+    const trades = (data?.data ?? []).slice(0, 30).map((t: any) => ({
+      name:             t.name,
+      transactionType:  t.transactionType === 'P' ? 'BUY' : t.transactionType === 'S' ? 'SELL' : t.transactionType,
+      shares:           t.share,
+      value:            t.value,
+      transactionDate:  t.transactionDate,
+      filingDate:       t.filingDate,
+    }));
+
+    const result = { symbol: upper, trades };
+    await this.cache.set(cacheKey, result, 3600 * 6);
+    return result;
   }
 
   async getPolitical(symbol: string) {
-    const c = await this.cache.get('political', { symbol });
-    if (c) return c;
-    try {
-      // House Stock Watcher & Senate Stock Watcher — free CSV endpoints
-      const [house, senate] = await Promise.allSettled([
-        axios.get('https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json', { timeout: 12000 }),
-        axios.get('https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json', { timeout: 12000 }),
-      ]);
-      const sym = symbol.toUpperCase();
-      const parse = (r: any) =>
-        r.status === 'fulfilled'
-          ? (r.value.data as any[]).filter(t => (t.ticker ?? '').toUpperCase() === sym).slice(0, 15)
-          : [];
-      const r = { house: parse(house), senate: parse(senate), symbol };
-      await this.cache.set('political', { symbol }, r, 86400);
-      return r;
-    } catch { return { house: [], senate: [], symbol }; }
-  }
-
-  async getSummary(symbol: string) {
-    const [inst, insider, political] = await Promise.allSettled([
-      this.getInstitutional(symbol),
-      this.getInsider(symbol),
-      this.getPolitical(symbol),
-    ]);
+    // Finnhub doesn't have political trading — return structured placeholder
     return {
-      symbol,
-      institutional: inst.status      === 'fulfilled' ? inst.value      : { filings: [], total: 0 },
-      insider:       insider.status   === 'fulfilled' ? insider.value   : { trades: [] },
-      political:     political.status === 'fulfilled' ? political.value : { house: [], senate: [] },
+      symbol: symbol.toUpperCase(),
+      trades: [],
+      note: 'Political trading data not available from current data providers.',
     };
   }
 
-  async getGlobalSummary(symbols: string[]) {
-    const c = await this.cache.get('global_flows', { symbols: symbols.join(',') });
-    if (c) return c;
-    // Build net flow data from DB signals for dashboard chart
-    const data = await this.prisma.stockSignal.groupBy({
-      by: ['stockId'],
-      where: { signalType: { in: ['SMART_MONEY_ENTRY', 'ACCUMULATION'] }, detectedAt: { gte: new Date(Date.now() - 30 * 86400000) } },
-      _count: { _all: true },
-      _avg:   { strength: true },
-    });
-    const stocks = await this.prisma.stock.findMany({ where: { symbol: { in: symbols } }, select: { id: true, symbol: true } });
-    const symbolMap = Object.fromEntries(stocks.map(s => [s.id, s.symbol]));
-    const institutional = data.map(d => ({
-      symbol:  symbolMap[d.stockId] ?? d.stockId,
-      netFlow: d._count._all * (d._avg.strength ?? 0) * 1e6,
-    })).filter(d => d.symbol).slice(0, 10);
-    const r = { institutional, generatedAt: new Date().toISOString() };
-    await this.cache.set('global_flows', { symbols: symbols.join(',') }, r, 3600);
-    return r;
+  async getFlowsSummary(symbol: string) {
+    const upper = symbol.toUpperCase();
+    const [inst, insider] = await Promise.all([
+      this.getInstitutional(upper),
+      this.getInsider(upper),
+    ]);
+
+    const instBuys  = inst.holders.filter((h: any) => h.changeType === 'BUY').length;
+    const instSells = inst.holders.filter((h: any) => h.changeType === 'SELL').length;
+    const insiderBuys  = insider.trades.filter((t: any) => t.transactionType === 'BUY').length;
+    const insiderSells = insider.trades.filter((t: any) => t.transactionType === 'SELL').length;
+
+    return {
+      symbol: upper,
+      institutional: { totalHolders: inst.holders.length, buying: instBuys, selling: instSells },
+      insider:        { totalTrades: insider.trades.length, buying: insiderBuys, selling: insiderSells },
+      signal: instBuys > instSells && insiderBuys >= insiderSells ? 'BULLISH'
+             : instSells > instBuys && insiderSells > insiderBuys ? 'BEARISH'
+             : 'NEUTRAL',
+    };
   }
 
-  async getRecentInsiderTrades(limit = 20) {
-    const c = await this.cache.get('recent_insider', { limit });
-    if (c) return c;
-    try {
-      const { data } = await axios.get(
-        `https://efts.sec.gov/LATEST/search-index?forms=4&dateRange=custom&startdt=${this.ago(14)}&enddt=${this.ago(0)}`,
-        { headers: { 'User-Agent': 'QuantGoeuryInvestments research@quant.com' }, timeout: 10000 },
-      );
-      const trades = (data?.hits?.hits ?? []).slice(0, limit).map((h: any) => ({
-        symbol:  h._source?.display_names?.[0] ?? 'N/A',
-        filer:   h._source?.entity_name ?? 'Unknown',
-        filedAt: h._source?.file_date ?? '',
-        type:    'Form 4',
-        url:     `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${h._source?.entity_id ?? ''}&type=4`,
-      }));
-      await this.cache.set('recent_insider', { limit }, trades, 3600);
-      return trades;
-    } catch { return []; }
+  async getGlobalSummary() {
+    // Aggregate across tracked stocks from DB
+    const stocks = await this.prisma.stock.findMany({ take: 20, orderBy: { symbol: 'asc' } });
+    return {
+      trackedSymbols: stocks.map(s => s.symbol),
+      note: 'Use /flows/:sym/summary for per-symbol flow analysis.',
+    };
   }
 
-  async getRecentPolitical() {
-    const c = await this.cache.get('recent_political', {});
-    if (c) return c;
-    try {
-      const { data } = await axios.get(
-        'https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json',
-        { timeout: 12000 },
-      );
-      const trades = (data as any[]).slice(0, 30).map((t: any) => ({
-        politician: t.representative ?? 'Unknown',
-        ticker:     t.ticker ?? 'N/A',
-        type:       t.type ?? 'purchase',
-        amount:     t.amount ?? 'N/A',
-        date:       t.transaction_date ?? '',
-        party:      t.party ?? '',
-      }));
-      await this.cache.set('recent_political', {}, trades, 86400);
-      return trades;
-    } catch { return []; }
+  async getAllInsiderTrades() {
+    const cacheKey = 'flows:insider:all';
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Pull insider trades for top tracked symbols
+    const stocks = await this.prisma.stock.findMany({ take: 10, orderBy: { symbol: 'asc' } });
+    const allTrades: any[] = [];
+
+    for (const stock of stocks) {
+      const data = await this.getInsider(stock.symbol).catch(() => null);
+      if (data?.trades) allTrades.push(...data.trades.map((t: any) => ({ ...t, symbol: stock.symbol })));
+    }
+
+    const result = {
+      trades: allTrades.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()).slice(0, 50),
+    };
+
+    await this.cache.set(cacheKey, result, 3600);
+    return result;
+  }
+
+  async getAllPolitical() {
+    return { trades: [], note: 'Political trading data not available from current data providers.' };
   }
 }
