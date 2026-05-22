@@ -47,11 +47,69 @@ export class AdminService {
       this.prisma.stockScore.count(),
       this.prisma.stockSignal.count(),
     ]);
-    const [cacheCount] = await Promise.all([
-      this.prisma.apiCache.count({
-        where: { createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    const cacheCount = await this.prisma.apiCache.count({
+      where: { createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    });
+    return { totalUsers, pendingUsers, approvedUsers, totalScoresComputed: totalScores, totalSignalsDetected: totalSignals, apiCallsToday: cacheCount };
+  }
+
+  // ─── Cache Management ────────────────────────────────────────────────────────
+
+  async getCacheStats() {
+    const now = new Date();
+    const [total, alive, expired, byEndpoint] = await Promise.all([
+      this.prisma.apiCache.count(),
+      this.prisma.apiCache.count({ where: { expiresAt: { gte: now } } }),
+      this.prisma.apiCache.count({ where: { expiresAt: { lt: now } } }),
+      this.prisma.apiCache.groupBy({
+        by: ['endpoint'],
+        _count: { cacheKey: true },
+        orderBy: { _count: { cacheKey: 'desc' } },
       }),
     ]);
-    return { totalUsers, pendingUsers, approvedUsers, totalScoresComputed: totalScores, totalSignalsDetected: totalSignals, apiCallsToday: cacheCount };
+    const recentEntries = await this.prisma.apiCache.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { cacheKey: true, endpoint: true, createdAt: true, expiresAt: true },
+    });
+    return {
+      total,
+      alive,
+      expired,
+      byEndpoint: byEndpoint.map(e => ({ endpoint: e.endpoint, count: e._count.cacheKey })),
+      recentEntries,
+    };
+  }
+
+  async bustSymbol(symbol: string) {
+    const upper = symbol.toUpperCase();
+    const result = await this.prisma.apiCache.deleteMany({
+      where: { cacheKey: { contains: upper } },
+    });
+    return {
+      symbol: upper,
+      deleted: result.count,
+      message: result.count > 0
+        ? `✅ Cleared ${result.count} cache entr${result.count === 1 ? 'y' : 'ies'} for ${upper}. Next request will fetch live data.`
+        : `ℹ️ No cached entries found for ${upper} — already fresh.`,
+    };
+  }
+
+  async bustAll() {
+    const result = await this.prisma.apiCache.deleteMany({});
+    return {
+      deleted: result.count,
+      message: `✅ Wiped entire cache — ${result.count} entries removed. All next requests will fetch live data.`,
+    };
+  }
+
+  async bustExpired() {
+    const result = await this.prisma.apiCache.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    return {
+      deleted: result.count,
+      message: `✅ Removed ${result.count} expired entr${result.count === 1 ? 'y' : 'ies'}.`,
+    };
   }
 }

@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Param, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { AdminService } from './admin.service';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -25,4 +25,22 @@ export class AdminController {
 
   @Get('metrics')
   metrics() { return this.svc.getMetrics(); }
+
+  // ─── Cache Management ────────────────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Get cache statistics (total, alive, expired, by endpoint)' })
+  @Get('cache/stats')
+  cacheStats() { return this.svc.getCacheStats(); }
+
+  @ApiOperation({ summary: 'Bust cache for a specific symbol (e.g. TSLA)' })
+  @Delete('cache/symbol/:symbol')
+  bustSymbol(@Param('symbol') symbol: string) { return this.svc.bustSymbol(symbol); }
+
+  @ApiOperation({ summary: 'Wipe all cache entries' })
+  @Delete('cache/all')
+  bustAll() { return this.svc.bustAll(); }
+
+  @ApiOperation({ summary: 'Remove only expired cache entries (housekeeping)' })
+  @Delete('cache/expired')
+  bustExpired() { return this.svc.bustExpired(); }
 }
