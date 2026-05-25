@@ -54,14 +54,24 @@ export class FlowsService {
       params: { symbol: upper, token: this.fhKey },
     }).then(r => r.data).catch(() => null);
 
-    const trades = (data?.data ?? []).slice(0, 30).map((t: any) => ({
-      name:            t.name,
-      transactionType: t.transactionType === 'P' ? 'BUY' : t.transactionType === 'S' ? 'SELL' : t.transactionType,
-      shares:          t.share,
-      value:           t.value,
-      transactionDate: t.transactionDate,
-      filingDate:      t.filingDate,
-    }));
+    // Finnhub transactionCode: 'P' = Purchase/BUY, 'S' = Sale/SELL
+    // Some endpoints use transactionType directly
+    const trades = (data?.data ?? []).slice(0, 30).map((t: any) => {
+      const code = t.transactionCode ?? t.transactionType ?? '';
+      const type = code === 'P' ? 'BUY'
+                 : code === 'S' ? 'SELL'
+                 : code === 'BUY' ? 'BUY'
+                 : code === 'SELL' ? 'SELL'
+                 : 'OTHER';
+      return {
+        name:            t.name,
+        transactionType: type,
+        shares:          Math.abs(t.share ?? t.shares ?? 0),
+        value:           Math.abs(t.value ?? 0),
+        transactionDate: t.transactionDate,
+        filingDate:      t.filingDate,
+      };
+    }).filter((t: any) => t.transactionType === 'BUY' || t.transactionType === 'SELL');
 
     const result = { symbol: upper, trades };
     await this.cache.set(cacheKey, result, 3600 * 6);
@@ -88,17 +98,21 @@ export class FlowsService {
     const insiderBuys  = insider.trades.filter((t: any) => t.transactionType === 'BUY').length;
     const insiderSells = insider.trades.filter((t: any) => t.transactionType === 'SELL').length;
 
+    // Net insider flow: use share count delta as proxy for chart
+    const buyShares  = insider.trades.filter((t: any) => t.transactionType === 'BUY').reduce((s: number, t: any) => s + (t.shares ?? 0), 0);
+    const sellShares = insider.trades.filter((t: any) => t.transactionType === 'SELL').reduce((s: number, t: any) => s + (t.shares ?? 0), 0);
+    const netInsiderShares = buyShares - sellShares;
+
     return {
       symbol: upper,
       institutional: { totalHolders: inst.holders.length, buying: instBuys, selling: instSells },
-      insider:        { totalTrades: insider.trades.length, buying: insiderBuys, selling: insiderSells },
-      signal: instBuys > instSells && insiderBuys >= insiderSells ? 'BULLISH'
-             : instSells > instBuys && insiderSells > insiderBuys ? 'BEARISH'
+      insider:        { totalTrades: insider.trades.length, buying: insiderBuys, selling: insiderSells, netShares: netInsiderShares },
+      signal: insiderBuys > insiderSells ? 'BULLISH'
+             : insiderSells > insiderBuys ? 'BEARISH'
              : 'NEUTRAL',
     };
   }
 
-  // Controller passes an optional string[] of symbols
   async getGlobalSummary(symbols: string[] = ['AAPL','NVDA','MSFT','TSLA','META','AMZN','GOOGL','JPM','V','SPY']) {
     const results = await Promise.allSettled(
       symbols.map(sym => this.getSummary(sym))
@@ -120,7 +134,9 @@ export class FlowsService {
 
     for (const stock of stocks) {
       const data = await this.getInsider(stock.symbol).catch(() => null);
-      if (data?.trades) allTrades.push(...data.trades.map((t: any) => ({ ...t, symbol: stock.symbol })));
+      if (data?.trades?.length) {
+        allTrades.push(...data.trades.map((t: any) => ({ ...t, symbol: stock.symbol })));
+      }
     }
 
     const result = {
