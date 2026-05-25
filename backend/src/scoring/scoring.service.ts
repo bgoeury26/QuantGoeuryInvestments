@@ -149,6 +149,10 @@ export class ScoringService {
     // Earnings momentum modulator: maps the layer's 0–10 score to a [-1, +1] nudge.
     if (d.epsScore != null) s += (d.epsScore - 5) / 5;
 
+    // Catalyst awareness: an earnings event within 14 days raises the conviction
+    // multiplier slightly — the next print will either confirm or break the thesis.
+    if (d.catalystImminent) s += 0.3;
+
     return clamp(s, 0, 10);
   }
 

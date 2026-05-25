@@ -34,10 +34,12 @@ export class FlowsController {
     return this.f.getSummary(sym);
   }
 
-  /** GET /flows/summary — global flows summary (top movers) for dashboard */
+  /** GET /flows/summary — flows summary across the live universe. */
   @Get('summary')
   globalSummary(@Query('symbols') symbols?: string) {
-    const list = symbols ? symbols.split(',') : ['AAPL','NVDA','MSFT','TSLA','META','AMZN','GOOGL','JPM','V','SPY'];
+    // If explicit symbols are provided, honor them. Otherwise the service
+    // resolves the universe from the DB (discovered tickers + benchmarks).
+    const list = symbols ? symbols.split(',') : undefined;
     return this.f.getGlobalSummary(list);
   }
 

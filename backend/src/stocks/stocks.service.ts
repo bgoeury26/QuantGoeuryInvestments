@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { CacheService } from '../cache/cache.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { getJson, mean } from '../common/http.util';
+import { QuoteConsensusService } from '../providers/quote-consensus.service';
 
 /**
  * StocksService — quote / fundamentals / technicals / analyst / history.
@@ -24,11 +25,13 @@ export class StocksService {
     private readonly config: ConfigService,
     private readonly cache: CacheService,
     private readonly prisma: PrismaService,
+    private readonly consensus: QuoteConsensusService,
   ) {}
 
   private get fhKey() { return this.config.get<string>('FINNHUB_API_KEY'); }
   private get fmpKey() { return this.config.get<string>('FMP_API_KEY'); }
   private get polyKey() { return this.config.get<string>('POLYGON_API_KEY'); }
+  private get avKey() { return this.config.get<string>('ALPHA_VANTAGE_KEY'); }
 
   // Sector → SPDR sector ETF (used for relative-strength comparison)
   private static readonly SECTOR_ETF: Record<string, string> = {
@@ -120,17 +123,35 @@ export class StocksService {
     const cacheKey = `stocks:quote:${upper}`;
     const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
-    if (!this.fhKey) return null;
 
-    const data = await getJson<any>('https://finnhub.io/api/v1/quote', {
-      params: { symbol: upper, token: this.fhKey },
-    }, 'Finnhub quote');
+    // Finnhub remains the primary because it's the only source that returns
+    // intraday change / day OHLC consistently on the free tier. The consensus
+    // layer cross-checks the close against TwelveData / IEX / Marketstack.
+    const [fh, cons] = await Promise.all([
+      this.fhKey
+        ? getJson<any>('https://finnhub.io/api/v1/quote',
+            { params: { symbol: upper, token: this.fhKey } }, 'Finnhub quote')
+        : Promise.resolve(null),
+      this.consensus.getConsensusQuote(upper),
+    ]);
 
+    const price = cons?.price ?? fh?.c ?? null;
     const result = {
       symbol: upper,
-      price: data?.c, change: data?.d, changePercent: data?.dp,
-      high: data?.h, low: data?.l, open: data?.o, previousClose: data?.pc,
-      timestamp: data?.t ? new Date(data.t * 1000).toISOString() : null,
+      price,
+      change: fh?.d ?? null,
+      changePercent: fh?.dp ?? null,
+      high: fh?.h, low: fh?.l, open: fh?.o, previousClose: fh?.pc,
+      timestamp: fh?.t ? new Date(fh.t * 1000).toISOString() : null,
+      // Data-quality metadata — surface in UI for transparency.
+      dataQuality: cons
+        ? {
+            sources: cons.sources,
+            dispersion: cons.dispersion,
+            disagreement: cons.disagreement,
+            raw: cons.raw,
+          }
+        : null,
     };
     await this.cache.set(cacheKey, result, 60);
     return result;
@@ -147,7 +168,7 @@ export class StocksService {
     if (cached) return cached;
 
     if (this.fmpKey) {
-      const [ratios, metrics, growth, surprises] = await Promise.all([
+      const [ratios, metrics, growth, surprises, upcoming] = await Promise.all([
         getJson<any[]>(`https://financialmodelingprep.com/api/v3/ratios-ttm/${upper}`, {
           params: { apikey: this.fmpKey },
         }, 'FMP ratios'),
@@ -160,6 +181,7 @@ export class StocksService {
         getJson<any[]>(`https://financialmodelingprep.com/api/v3/earnings-surprises/${upper}`, {
           params: { apikey: this.fmpKey },
         }, 'FMP earnings-surprises'),
+        this.getUpcomingEarnings(upper),
       ]);
       const r = ratios?.[0] ?? {};
       const m = metrics?.[0] ?? {};
@@ -188,6 +210,10 @@ export class StocksService {
         epsBeatRate4q: earnings.beatRate,
         epsSurpriseLast: earnings.lastSurprisePct,
         epsScore: earnings.score,
+        // Catalyst awareness — upcoming earnings date
+        nextEarningsDate: upcoming?.nextDate ?? null,
+        daysUntilEarnings: upcoming?.daysUntil ?? null,
+        catalystImminent: upcoming?.daysUntil != null && upcoming.daysUntil >= 0 && upcoming.daysUntil <= 14,
       };
       await this.cache.set(cacheKey, result, 3600 * 6);
       return result;
@@ -438,6 +464,52 @@ export class StocksService {
     };
     await this.cache.set(cacheKey, result, 3600);
     return result;
+  }
+
+  /**
+   * Upcoming earnings via Alpha Vantage EARNINGS_CALENDAR (free, 25/day).
+   * Returns the next earnings date and days-until, or null if not available.
+   *
+   * Why Alpha Vantage and not FMP: FMP's /v3/earning_calendar requires a paid
+   * tier for ticker filtering; AV's CSV endpoint is fully free and filterable.
+   */
+  async getUpcomingEarnings(symbol: string): Promise<{
+    nextDate: string | null; daysUntil: number | null;
+  } | null> {
+    if (!this.avKey) return null;
+    const upper = symbol.toUpperCase();
+    const cacheKey = `stocks:earnings-cal:${upper}`;
+    const cached = await this.cache.get<any>(cacheKey);
+    if (cached) return cached;
+
+    // AV returns CSV; we fetch as text and parse.
+    const url = `https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&symbol=${upper}&horizon=3month&apikey=${this.avKey}`;
+    try {
+      const res = await (await import('axios')).default.get<string>(url, { timeout: 12000 });
+      const csv = String(res.data ?? '');
+      const lines = csv.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) {
+        const out = { nextDate: null, daysUntil: null };
+        await this.cache.set(cacheKey, out, 86400);
+        return out;
+      }
+      const header = lines[0].split(',');
+      const dateIdx = header.indexOf('reportDate');
+      const row = lines[1].split(',');
+      const date = dateIdx >= 0 ? row[dateIdx] : null;
+      if (!date) {
+        const out = { nextDate: null, daysUntil: null };
+        await this.cache.set(cacheKey, out, 86400);
+        return out;
+      }
+      const daysUntil = Math.round((new Date(date).getTime() - Date.now()) / 86400_000);
+      const out = { nextDate: date, daysUntil };
+      await this.cache.set(cacheKey, out, 86400);
+      return out;
+    } catch (e) {
+      this.logger.warn(`AV earnings-calendar failed for ${upper}: ${e}`);
+      return null;
+    }
   }
 
   /**

@@ -80,7 +80,7 @@ export default function FlowsPage() {
             </ResponsiveContainer>
           ) : (
             <p className="text-xs text-muted text-center py-8">
-              All insider trades are neutral (no BUY/SELL direction data from Finnhub free tier).
+              No insider activity in the current universe yet — discovery runs daily at 8 AM ET.
             </p>
           )}
         </div>
@@ -169,7 +169,7 @@ export default function FlowsPage() {
           </div>
         ) : (
           <p className="text-xs text-muted text-center py-8">
-            No insider trades found. Finnhub free tier may not return transaction types for all symbols.
+            No insider transactions yet. Trigger a discovery run via Admin → Discover Now.
           </p>
         )}
       </div>

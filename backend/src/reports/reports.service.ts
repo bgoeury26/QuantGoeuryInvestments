@@ -94,26 +94,128 @@ export class ReportsService {
 
   async downloadReport(id: string): Promise<Buffer> {
     const report = await this.getReport(id);
-    try {
-      let puppeteer: any = null;
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        puppeteer = require('puppeteer');
-      } catch {
-        puppeteer = null;
-      }
-      if (puppeteer) {
-        const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
-        const page = await browser.newPage();
-        await page.setContent(this.buildReportHtml(report));
-        const pdf = await page.pdf({ format: 'A4', printBackground: true });
-        await browser.close();
-        return Buffer.from(pdf);
-      }
-    } catch (e) {
-      this.logger.warn(`PDF generation failed: ${e}`);
+    return this.renderPdf(report);
+  }
+
+  /**
+   * Render a branded one-pager PDF using PDFKit (pure-JS, no Chrome dependency).
+   * Layout: header strip, ticker block, composite score bars, alpha signal, AI
+   * three-view (bullish/bearish/neutral), disclaimer footer.
+   */
+  private async renderPdf(report: any): Promise<Buffer> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c: Buffer) => chunks.push(c));
+
+    const c = (report.content ?? {}) as any;
+    const ai = {
+      bullish: { reco: c.aiBullish, conf: c.aiBullishConf },
+      bearish: { reco: c.aiBearish, conf: c.aiBearishConf },
+      neutral: { reco: c.aiNeutral, conf: c.aiNeutralConf },
+    };
+
+    // ── Header strip ────────────────────────────────────────────────────
+    doc.rect(0, 0, 595, 60).fill('#0f1419');
+    doc.fillColor('#4f98a3').fontSize(18).font('Helvetica-Bold')
+       .text('QuantGoeuryInvestments', 40, 22);
+    doc.fillColor('#888').fontSize(9).font('Helvetica')
+       .text('AI Research Report', 40, 42);
+    doc.fillColor('#fff').fontSize(11).font('Helvetica')
+       .text(new Date(report.createdAt).toLocaleString(), 0, 22, { align: 'right', width: 555 });
+    doc.fillColor('#888').fontSize(9)
+       .text(`Report ID: ${report.id}`, 0, 42, { align: 'right', width: 555 });
+
+    // ── Ticker block ────────────────────────────────────────────────────
+    doc.fillColor('#000').fontSize(36).font('Helvetica-Bold')
+       .text(report.symbol, 40, 85);
+    doc.fillColor('#444').fontSize(11).font('Helvetica')
+       .text(report.title ?? '', 40, 132);
+
+    // ── Composite score bars ─────────────────────────────────────────────
+    let y = 170;
+    doc.fillColor('#0f1419').fontSize(13).font('Helvetica-Bold').text('Composite Score', 40, y);
+    y += 22;
+    const dims: [string, number | undefined][] = [
+      ['Fundamental',   c.fundamental],
+      ['Technical',     c.technical],
+      ['Sentiment',     c.sentiment],
+      ['Institutional', c.institutional],
+      ['Analyst',       c.analyst],
+      ['Political',     c.political],
+      ['Macro',         c.macro],
+    ];
+    for (const [label, v] of dims) {
+      const value = typeof v === 'number' ? v : 0;
+      doc.fillColor('#333').fontSize(10).font('Helvetica').text(label, 40, y, { width: 95 });
+      doc.rect(145, y + 1, 300, 10).fill('#eee');
+      const color = value >= 7.5 ? '#22c55e' : value >= 5 ? '#eab308' : '#ef4444';
+      doc.rect(145, y + 1, (value / 10) * 300, 10).fill(color);
+      doc.fillColor('#111').fontSize(10).font('Helvetica-Bold')
+         .text(value.toFixed(1) + ' / 10', 460, y, { width: 95, align: 'right' });
+      y += 18;
     }
-    return Buffer.from(JSON.stringify(report, null, 2), 'utf-8');
+    y += 6;
+    doc.moveTo(40, y).lineTo(555, y).strokeColor('#ddd').stroke();
+    y += 14;
+    doc.fillColor('#0f1419').fontSize(13).font('Helvetica-Bold')
+       .text(`Final Score: ${Number(c.finalScore ?? 0).toFixed(1)} / 10`, 40, y);
+    doc.fillColor('#666').fontSize(10).font('Helvetica')
+       .text(`Confidence: ${((c.confidence ?? 1) * 100).toFixed(0)}%`, 0, y + 2, { align: 'right', width: 555 });
+    y += 30;
+
+    // ── Alpha signal ────────────────────────────────────────────────────
+    doc.fillColor('#0f1419').fontSize(13).font('Helvetica-Bold').text('Alpha Signal', 40, y);
+    y += 20;
+    doc.fillColor('#333').fontSize(10).font('Helvetica')
+       .text(`Type: `, 40, y, { continued: true })
+       .font('Helvetica-Bold').text(c.signalType ?? 'N/A');
+    y += 16;
+    doc.font('Helvetica').text(`Anomaly score: `, 40, y, { continued: true })
+       .font('Helvetica-Bold').text(`${((c.anomalyScore ?? 0) * 100).toFixed(0)}%`);
+    y += 16;
+    doc.font('Helvetica').text(`Early opportunity: `, 40, y, { continued: true })
+       .font('Helvetica-Bold').text(c.isEarlyOpportunity ? 'Yes' : 'No');
+    y += 16;
+    if (Array.isArray(c.drivers) && c.drivers.length) {
+      doc.font('Helvetica').text('Drivers:', 40, y);
+      y += 14;
+      for (const d of c.drivers) {
+        doc.fillColor('#555').text(`  • ${d}`, 40, y);
+        y += 13;
+      }
+    }
+    y += 10;
+
+    // ── AI three-view ───────────────────────────────────────────────────
+    doc.fillColor('#0f1419').fontSize(13).font('Helvetica-Bold').text('AI Three-View Analysis', 40, y);
+    y += 20;
+    const renderView = (title: string, accent: string, reco: any, conf: any) => {
+      doc.rect(40, y, 515, 50).fill('#fafafa').stroke('#e5e5e5');
+      doc.fillColor(accent).fontSize(11).font('Helvetica-Bold').text(title, 50, y + 8);
+      doc.fillColor('#666').fontSize(9).font('Helvetica')
+         .text(`Confidence: ${((conf ?? 0) * 100).toFixed(0)}%`, 0, y + 8, { align: 'right', width: 545 });
+      doc.fillColor('#222').fontSize(10).font('Helvetica')
+         .text(String(reco ?? '—'), 50, y + 24, { width: 495 });
+      y += 56;
+    };
+    renderView('Bullish view', '#22c55e', ai.bullish.reco, ai.bullish.conf);
+    renderView('Bearish view', '#ef4444', ai.bearish.reco, ai.bearish.conf);
+    renderView('Neutral view', '#888888', ai.neutral.reco, ai.neutral.conf);
+
+    // ── Footer disclaimer ───────────────────────────────────────────────
+    doc.fillColor('#999').fontSize(8).font('Helvetica')
+       .text(
+         'This report is generated for research purposes only and does not constitute investment advice. ' +
+         'Data is aggregated from public APIs (SEC EDGAR, FMP, Polygon, Finnhub, NewsAPI, Reddit, GDELT) ' +
+         'and may be incomplete or delayed.',
+         40, 790, { width: 515, align: 'center' },
+       );
+
+    doc.end();
+    await new Promise<void>((resolve) => doc.on('end', () => resolve()));
+    return Buffer.concat(chunks);
   }
 
   private generateAIAnalysis(score: ScoreResult, anomaly: AnomalyResult): AIAnalysis {

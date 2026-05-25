@@ -10,10 +10,20 @@ import axios, { AxiosRequestConfig } from 'axios';
 
 const log = new Logger('HttpUtil');
 
+// SEC EDGAR rejects requests with generic/unparseable User-Agent strings.
+// The format SEC accepts is: "Company Name AdminContactEmail@domain.com".
+// We read SEC_USER_AGENT first (set this to your real name + email), then
+// fall back to ADMIN_EMAIL if present, then to a safe default that still
+// includes a valid email format.
+const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
+const userAgent =
+  process.env.SEC_USER_AGENT ||
+  `QuantGoeuryInvestments research ${adminEmail}`;
+
 export const http = axios.create({
   timeout: 12000,
   headers: {
-    'User-Agent': 'QuantGoeuryInvestments/1.0 (research; contact@quantgoeury.local)',
+    'User-Agent': userAgent,
     Accept: 'application/json',
   },
 });

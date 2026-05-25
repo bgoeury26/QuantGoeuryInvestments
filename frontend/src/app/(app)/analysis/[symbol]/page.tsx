@@ -500,9 +500,32 @@ export default function AnalysisPage() {
             {alpha?.earlyFlag && <span className="badge badge-primary text-[10px] animate-pulse">⚡ Early Opportunity</span>}
           </div>
         </div>
-        <a href={`/reports?prefill=${sym}`} className="btn-ghost h-8 flex items-center gap-1.5 text-xs">
+        <button
+          onClick={async () => {
+            try {
+              // 1. Generate (or get existing) report for this symbol.
+              const gen = await api.post('/reports/generate', { symbol: sym });
+              const reportId = gen?.data?.id;
+              if (!reportId) throw new Error('Report id missing in response');
+              // 2. Download the actual PDF binary.
+              const pdf = await api.get(`/reports/${reportId}/download`, { responseType: 'blob' });
+              const url = window.URL.createObjectURL(new Blob([pdf.data], { type: 'application/pdf' }));
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${sym}-${new Date().toISOString().slice(0, 10)}.pdf`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              window.URL.revokeObjectURL(url);
+            } catch (e) {
+              console.error('PDF generation failed', e);
+              alert('Could not generate PDF — check backend logs.');
+            }
+          }}
+          className="btn-ghost h-8 flex items-center gap-1.5 text-xs"
+        >
           <Download className="w-3.5 h-3.5" /> PDF Report
-        </a>
+        </button>
       </div>
 
       {/* Quote header */}

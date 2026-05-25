@@ -17,6 +17,14 @@ export class AlphaController {
     return this.alphaService.getEarlyOpportunities();
   }
 
+  /** Most recent signals across the entire universe (Dashboard widget). */
+  // NOTE: must be declared BEFORE /signals/:symbol so Nest's router doesn't
+  // interpret "recent" as the symbol parameter.
+  @Get('signals/recent')
+  getRecentSignals(@Query('limit') limit?: string) {
+    return this.alphaService.getRecentSignals(limit ? parseInt(limit) : 8);
+  }
+
   @Get('signals/:symbol')
   getSignals(@Param('symbol') symbol: string) {
     return this.alphaService.getLatestSignals(symbol);

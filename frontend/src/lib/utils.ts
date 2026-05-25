@@ -5,11 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function fmt(value: number | null | undefined, currency = 'USD'): string {
-  if (value == null) return 'N/A';
+/**
+ * Format a number with thousands separators and 2 decimals.
+ * Does NOT include a currency symbol — callers are expected to prepend "$"
+ * (or whatever) themselves. This prevents the "$$308.82" double-prefix bug.
+ */
+export function fmt(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);

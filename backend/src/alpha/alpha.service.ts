@@ -179,6 +179,28 @@ export class AlphaService {
       take: 20,
     });
   }
+
+  /**
+   * Latest signals across every stock in the DB, flattened with symbol
+   * pulled up to the top level for direct rendering in the Dashboard.
+   */
+  async getRecentSignals(limit = 8): Promise<any[]> {
+    const rows = await this.prisma.stockSignal.findMany({
+      orderBy: { detectedAt: 'desc' },
+      take: limit,
+      include: { stock: { select: { symbol: true, name: true } } },
+    });
+    return rows.map((s) => ({
+      id: s.id,
+      symbol: s.stock.symbol,
+      name: s.stock.name,
+      signalType: s.signalType,
+      strength: s.strength,
+      earlyFlag: s.earlyFlag,
+      description: s.description,
+      detectedAt: s.detectedAt,
+    }));
+  }
 }
 
 const r2 = (n: number) => Math.round(n * 1000) / 1000;

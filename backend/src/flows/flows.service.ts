@@ -275,9 +275,17 @@ export class FlowsService {
     };
   }
 
-  async getGlobalSummary(
-    symbols: string[] = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'META', 'AMZN', 'GOOGL', 'JPM', 'V', 'SPY'],
-  ) {
+  async getGlobalSummary(symbols?: string[]) {
+    // Default universe = stocks currently in the DB, sorted to put discovered
+    // (flow-flagged) tickers first. Caps at 12 to keep the dashboard snappy.
+    if (!symbols || symbols.length === 0) {
+      const stocks = await this.prisma.stock.findMany({
+        orderBy: [{ discoveredAt: 'desc' }, { symbol: 'asc' }],
+        take: 12,
+      });
+      symbols = stocks.map((s) => s.symbol);
+      if (symbols.length === 0) symbols = ['SPY', 'QQQ']; // hard fallback
+    }
     const results = await Promise.allSettled(symbols.map((s) => this.getSummary(s)));
     return {
       summaries: results
