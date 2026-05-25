@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CacheService } from '../cache/cache.service';
 import { getJson, postJson } from '../common/http.util';
+import { StocktwitsService } from '../providers/stocktwits.service';
 
 /**
  * SentimentService — news + social attention.
@@ -24,6 +25,7 @@ export class SentimentService {
   constructor(
     private readonly config: ConfigService,
     private readonly cache: CacheService,
+    private readonly stocktwits: StocktwitsService,
   ) {}
 
   private static readonly POSITIVE = [
@@ -113,6 +115,8 @@ export class SentimentService {
     const from = new Date(Date.now() - 7 * 86400_000).toISOString().split('T')[0];
     const to = new Date().toISOString().split('T')[0];
 
+    // Tiingo News requires their paid "Power" plan; on the free tier it 403s.
+    // News stays on NewsAPI + Finnhub; Tiingo is used in the quote consensus instead.
     const [apiNews, fhNews] = await Promise.all([
       newsApiKey
         ? getJson<any>('https://newsapi.org/v2/everything', {
@@ -139,7 +143,16 @@ export class SentimentService {
       url: a.url, summary: a.summary,
     }));
 
-    const result = { symbol: upper, articles: [...a1, ...a2] };
+    // De-dupe by title prefix (different providers often run the same wire story).
+    const seen = new Set<string>();
+    const articles = [...a1, ...a2].filter((a) => {
+      const key = (a.title ?? '').slice(0, 80).toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const result = { symbol: upper, articles };
     await this.cache.set(cacheKey, result, 900);
     return result;
   }
@@ -177,15 +190,47 @@ export class SentimentService {
     const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
 
+    // Two independent social sources — Reddit (text-only via lexicon)
+    // and Stocktwits (user-tagged bullish/bearish ratio).
+    const [reddit, twits] = await Promise.all([
+      this.getRedditMentions(upper),
+      this.stocktwits.getStream(upper),
+    ]);
+
+    const redditScore = reddit?.score ?? 0;
+    const redditCount = reddit?.posts?.length ?? 0;
+    const twitsScore = twits?.score ?? 0;
+    const twitsCount = twits?.mentionCount ?? 0;
+
+    // Weighted average — heavier weight to the source with more mentions.
+    const totalCount = redditCount + twitsCount;
+    const blendedScore = totalCount === 0
+      ? 0
+      : (redditScore * redditCount + twitsScore * twitsCount) / totalCount;
+
+    const sources: string[] = [];
+    if (redditCount) sources.push('Reddit');
+    if (twitsCount) sources.push('Stocktwits');
+
+    const result = {
+      symbol: upper,
+      mentionCount: totalCount,
+      score: Math.round(blendedScore * 100) / 100,
+      reddit: { score: redditScore, posts: reddit?.posts ?? [] },
+      stocktwits: twits
+        ? { score: twitsScore, bullish: twits.bullishCount, bearish: twits.bearishCount, messages: twits.messages }
+        : null,
+      sources,
+      note: sources.length === 0 ? 'No social data sources available' : undefined,
+    };
+    await this.cache.set(cacheKey, result, 900);
+    return result;
+  }
+
+  /** Reddit-only fetch — extracted so getSocialMentions can blend it with Stocktwits. */
+  private async getRedditMentions(upper: string): Promise<{ score: number; posts: any[] } | null> {
     const token = await this.getRedditToken();
-    if (!token) {
-      const result = {
-        symbol: upper, mentionCount: 0, score: 0, posts: [],
-        note: 'Reddit credentials not configured',
-      };
-      await this.cache.set(cacheKey, result, 900);
-      return result;
-    }
+    if (!token) return null;
 
     const ua = this.config.get<string>('REDDIT_USER_AGENT') ?? 'QuantGoeuryInvestments/1.0';
     const data = await getJson<any>(
@@ -201,9 +246,7 @@ export class SentimentService {
       title: c.data?.title,
       subreddit: c.data?.subreddit,
       score: c.data?.score,
-      created: c.data?.created_utc
-        ? new Date(c.data.created_utc * 1000).toISOString()
-        : null,
+      created: c.data?.created_utc ? new Date(c.data.created_utc * 1000).toISOString() : null,
       url: `https://reddit.com${c.data?.permalink ?? ''}`,
     }));
 
@@ -212,14 +255,7 @@ export class SentimentService {
       ? polarities.reduce((a: number, b: number) => a + b, 0) / polarities.length
       : 0;
 
-    const result = {
-      symbol: upper,
-      mentionCount: posts.length,
-      score: Math.round(score * 100) / 100,
-      posts: posts.slice(0, 10),
-    };
-    await this.cache.set(cacheKey, result, 900);
-    return result;
+    return { score, posts: posts.slice(0, 10) };
   }
 
   // --------------------------------------------------------------- GDELT
