@@ -87,14 +87,19 @@ function QuoteHeader({ quote, symbol }: { quote: any; symbol: string }) {
   );
 }
 
-function PriceChart({ history }: { history: any[] }) {
-  const data = (history ?? []).map((d: any) => ({
+function PriceChart({ history }: { history: any }) {
+  // Backend returns { symbol, candles: [...] } — unwrap safely
+  const arr: any[] = Array.isArray(history)
+    ? history
+    : (history?.candles ?? history?.history ?? history?.data ?? []);
+
+  const data = arr.map((d: any) => ({
     date:  d.date,
     close: d.close,
     vol:   d.volume,
   }));
-  const min  = Math.min(...data.map(d => d.close)) * 0.98;
-  const max  = Math.max(...data.map(d => d.close)) * 1.02;
+  const min  = data.length ? Math.min(...data.map(d => d.close)) * 0.98 : 0;
+  const max  = data.length ? Math.max(...data.map(d => d.close)) * 1.02 : 100;
   const last = data[data.length - 1]?.close ?? 0;
   const first = data[0]?.close ?? last;
   const up    = last >= first;
@@ -102,38 +107,44 @@ function PriceChart({ history }: { history: any[] }) {
   return (
     <div className="card p-4">
       <h3 className="text-xs font-semibold text-text mb-3">Price History (6 months)</h3>
-      <ResponsiveContainer width="100%" height={200}>
-        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor={up ? 'var(--color-success)' : 'var(--color-danger)'} stopOpacity={0.25} />
-              <stop offset="95%" stopColor={up ? 'var(--color-success)' : 'var(--color-danger)'} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.4} />
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--color-muted)' }} tickLine={false} axisLine={false}
-            tickFormatter={(v) => v?.slice(5)} interval={Math.floor(data.length / 6)} />
-          <YAxis domain={[min, max]} tick={{ fontSize: 10, fill: 'var(--color-muted)' }} tickLine={false} axisLine={false}
-            tickFormatter={(v) => '$' + v.toFixed(0)} width={52} />
-          <Tooltip
-            contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: 'var(--color-muted)' }}
-            formatter={(v: any) => ['$' + fmt(v), 'Close']}
-          />
-          <Area type="monotone" dataKey="close" stroke={up ? 'var(--color-success)' : 'var(--color-danger)'}
-            strokeWidth={1.5} fill="url(#priceGrad)" dot={false} />
-        </AreaChart>
-      </ResponsiveContainer>
+      {data.length === 0 ? (
+        <p className="text-xs text-muted py-8 text-center">No price history available</p>
+      ) : (
+        <>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={up ? 'var(--color-success)' : 'var(--color-danger)'} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={up ? 'var(--color-success)' : 'var(--color-danger)'} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.4} />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--color-muted)' }} tickLine={false} axisLine={false}
+                tickFormatter={(v) => v?.slice(5)} interval={Math.floor(data.length / 6)} />
+              <YAxis domain={[min, max]} tick={{ fontSize: 10, fill: 'var(--color-muted)' }} tickLine={false} axisLine={false}
+                tickFormatter={(v) => '$' + v.toFixed(0)} width={52} />
+              <Tooltip
+                contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: 'var(--color-muted)' }}
+                formatter={(v: any) => ['$' + fmt(v), 'Close']}
+              />
+              <Area type="monotone" dataKey="close" stroke={up ? 'var(--color-success)' : 'var(--color-danger)'}
+                strokeWidth={1.5} fill="url(#priceGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
 
-      {/* Volume bars */}
-      <div className="mt-2">
-        <ResponsiveContainer width="100%" height={48}>
-          <BarChart data={data} margin={{ top: 0, right: 4, bottom: 0, left: 0 }}>
-            <Bar dataKey="vol" fill="var(--color-primary)" opacity={0.4} radius={[1,1,0,0]} />
-            <XAxis hide /><YAxis hide />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+          {/* Volume bars */}
+          <div className="mt-2">
+            <ResponsiveContainer width="100%" height={48}>
+              <BarChart data={data} margin={{ top: 0, right: 4, bottom: 0, left: 0 }}>
+                <Bar dataKey="vol" fill="var(--color-primary)" opacity={0.4} radius={[1,1,0,0]} />
+                <XAxis hide /><YAxis hide />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -307,33 +318,45 @@ function AlphaPanel({ alpha }: { alpha: any }) {
 
 function ScoringPanel({ score }: { score: any }) {
   if (!score) return null;
+  // Support both flat field names (from /scoring/score/:sym) and suffixed names (from /scoring/stock/:id)
+  const finalScore        = score.finalScore        ?? 0;
+  const fundamentalScore  = score.fundamentalScore  ?? score.fundamental  ?? 0;
+  const technicalScore    = score.technicalScore    ?? score.technical    ?? 0;
+  const sentimentScore    = score.sentimentScore    ?? score.sentiment    ?? 0;
+  const institutionalScore= score.institutionalScore?? score.institutional?? 0;
+  const analystScore      = score.analystScore      ?? score.analyst      ?? 0;
+  const politicalScore    = score.politicalScore    ?? score.political    ?? 0;
+  const macroScore        = score.macroScore        ?? score.macro        ?? 0;
+  const confidenceFactor  = score.confidenceFactor  ?? score.confidence   ?? 1;
+  const rankingScore      = score.rankingScore      ?? 0;
+
   return (
-    <div className={cn('card p-4 border', scoreBg(score.finalScore ?? 0))}>
+    <div className={cn('card p-4 border', scoreBg(finalScore))}>
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xs font-semibold text-text flex items-center gap-2">
           <BarChart2 className="w-4 h-4 text-primary" /> Composite Score
         </h3>
         <div className="text-right">
-          <p className={cn('text-2xl font-bold tabular-nums', scoreColor(score.finalScore ?? 0))}>
-            {(score.finalScore ?? 0).toFixed(1)}
+          <p className={cn('text-2xl font-bold tabular-nums', scoreColor(finalScore))}>
+            {finalScore.toFixed(1)}
             <span className="text-xs text-muted font-normal"> /10</span>
           </p>
-          <p className="text-[10px] text-faint">confidence {((score.confidenceFactor ?? 1) * 100).toFixed(0)}%</p>
+          <p className="text-[10px] text-faint">confidence {(confidenceFactor * 100).toFixed(0)}%</p>
         </div>
       </div>
       <div className="space-y-2">
-        <ScoreBar label="Fundamental"   value={score.fundamentalScore   ?? 0} />
-        <ScoreBar label="Technical"     value={score.technicalScore     ?? 0} />
-        <ScoreBar label="Sentiment"     value={score.sentimentScore     ?? 0} />
-        <ScoreBar label="Institutional" value={score.institutionalScore ?? 0} />
-        <ScoreBar label="Analyst"       value={score.analystScore       ?? 0} />
-        <ScoreBar label="Political"     value={score.politicalScore     ?? 0} />
-        <ScoreBar label="Macro"         value={score.macroScore         ?? 0} />
+        <ScoreBar label="Fundamental"   value={fundamentalScore} />
+        <ScoreBar label="Technical"     value={technicalScore} />
+        <ScoreBar label="Sentiment"     value={sentimentScore} />
+        <ScoreBar label="Institutional" value={institutionalScore} />
+        <ScoreBar label="Analyst"       value={analystScore} />
+        <ScoreBar label="Political"     value={politicalScore} />
+        <ScoreBar label="Macro"         value={macroScore} />
       </div>
-      {score.rankingScore && (
+      {rankingScore > 0 && (
         <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
           <span className="text-xs text-muted">Ranking Score</span>
-          <span className="text-sm font-bold text-primary tabular-nums">{score.rankingScore.toFixed(2)}</span>
+          <span className="text-sm font-bold text-primary tabular-nums">{rankingScore.toFixed(2)}</span>
         </div>
       )}
     </div>
@@ -444,9 +467,11 @@ export default function AnalysisPage() {
   const { data: fund }     = useQuery({ queryKey: ['fund', sym],     queryFn: () => api.get(`/stocks/${sym}/fundamentals`).then(r => r.data), enabled: !!sym, staleTime: 3_600_000 });
   const { data: tech }     = useQuery({ queryKey: ['tech', sym],     queryFn: () => api.get(`/stocks/${sym}/technicals`).then(r => r.data),   enabled: !!sym, staleTime: 300_000 });
   const { data: analyst }  = useQuery({ queryKey: ['analyst', sym],  queryFn: () => api.get(`/stocks/${sym}/analyst`).then(r => r.data),      enabled: !!sym, staleTime: 3_600_000 });
+  // history endpoint returns { symbol, candles: [...] } — pass the whole response, PriceChart unwraps it
   const { data: history }  = useQuery({ queryKey: ['hist', sym],     queryFn: () => api.get(`/stocks/${sym}/history`).then(r => r.data),      enabled: !!sym, staleTime: 300_000 });
   const { data: alpha }    = useQuery({ queryKey: ['alpha', sym],    queryFn: () => api.get(`/alpha/anomaly/${sym}`).then(r => r.data),       enabled: !!sym, staleTime: 300_000 });
-  const { data: score }    = useQuery({ queryKey: ['score', sym],    queryFn: () => stock?.id ? api.get(`/scoring/stock/${stock.id}`).then(r => r.data) : null, enabled: !!stock?.id, staleTime: 600_000 });
+  // scoring/score/:sym returns flat field names (fundamental, technical, …) — ScoringPanel handles both
+  const { data: score }    = useQuery({ queryKey: ['score', sym],    queryFn: () => api.get(`/scoring/score/${sym}`).then(r => r.data),       enabled: !!sym, staleTime: 600_000 });
   const { data: flows }    = useQuery({ queryKey: ['flows', sym],    queryFn: () => api.get(`/flows/${sym}/summary`).then(r => r.data),       enabled: !!sym && tab === 'flows', staleTime: 300_000 });
   const { data: insider }  = useQuery({ queryKey: ['insider', sym],  queryFn: () => api.get(`/flows/${sym}/insider`).then(r => r.data),       enabled: !!sym && tab === 'flows', staleTime: 300_000 });
   const { data: political }= useQuery({ queryKey: ['pol', sym],      queryFn: () => api.get(`/flows/${sym}/political`).then(r => r.data),     enabled: !!sym && tab === 'flows', staleTime: 3_600_000 });
@@ -499,7 +524,7 @@ export default function AnalysisPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left: chart + score + alpha */}
           <div className="lg:col-span-2 space-y-4">
-            <PriceChart history={history ?? []} />
+            <PriceChart history={history} />
             <ScoringPanel score={score} />
             <AlphaPanel alpha={alpha} />
           </div>
@@ -516,11 +541,11 @@ export default function AnalysisPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <TechnicalPanel tech={tech} />
           <div className="space-y-4">
-            <PriceChart history={history ?? []} />
+            <PriceChart history={history} />
             {score && (
               <div className="card p-4 space-y-2">
                 <h3 className="text-xs font-semibold text-text mb-3">Technical Score Breakdown</h3>
-                <ScoreBar label="Technical" value={score.technicalScore ?? 0} />
+                <ScoreBar label="Technical" value={score.technicalScore ?? score.technical ?? 0} />
                 <ScoreBar label="Momentum"  value={score.rankingScore  ?? 0} max={12} />
               </div>
             )}
