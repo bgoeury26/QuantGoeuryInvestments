@@ -18,6 +18,11 @@ export class OpportunitiesController {
     );
   }
 
+  @Get('top')
+  async getTop(@Query('limit') limit?: string) {
+    return this.opportunitiesService.getTopOpportunities(limit ? parseInt(limit) : 10, 0);
+  }
+
   @Get('ranked')
   async getRanked(@Query('limit') limit?: string) {
     return this.opportunitiesService.getRankedOpportunities(limit ? parseInt(limit) : 10);

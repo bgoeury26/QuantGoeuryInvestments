@@ -157,7 +157,7 @@ function TechnicalPanel({ tech }: { tech: any }) {
     { label: 'MA 20',        value: '$' + fmt(tech.ma20 ?? 0),     signal: tech.price > tech.ma20 ? 'Above' : 'Below', bullish: tech.price > tech.ma20 },
     { label: 'MA 50',        value: '$' + fmt(tech.ma50 ?? 0),     signal: tech.price > tech.ma50 ? 'Above' : 'Below', bullish: tech.price > tech.ma50 },
     { label: 'MA 200',       value: '$' + fmt(tech.ma200 ?? 0),    signal: tech.price > tech.ma200 ? 'Above' : 'Below', bullish: tech.price > tech.ma200 },
-    { label: 'Vol vs 30d',   value: tech.volumeRatio?.toFixed(2) + 'x' ?? '—', signal: tech.volumeRatio > 1.5 ? 'Spike' : tech.volumeRatio > 1 ? 'Above avg' : 'Below avg', bullish: tech.volumeRatio > 1 },
+    { label: 'Vol vs 30d',   value: tech.volumeRatio != null ? tech.volumeRatio.toFixed(2) + 'x' : '—', signal: tech.volumeRatio > 1.5 ? 'Spike' : tech.volumeRatio > 1 ? 'Above avg' : 'Below avg', bullish: tech.volumeRatio > 1 },
   ];
   return (
     <div className="card p-4 space-y-2">

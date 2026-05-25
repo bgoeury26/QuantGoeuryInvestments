@@ -22,13 +22,14 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async me(@Request() req: any) {
-    const user = req.user;
+    const u = req.user;
     return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      status: user.status,
+      id: u.id ?? u.sub,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      status: u.status,
+      isAdmin: u.role === 'ADMIN',
     };
   }
 

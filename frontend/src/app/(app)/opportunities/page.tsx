@@ -83,6 +83,7 @@ export default function OpportunitiesPage() {
                   <th className="table-header text-left pb-2">Final Score</th>
                   <th className="table-header text-left pb-2">Anomaly</th>
                   <th className="table-header text-left pb-2">Signal</th>
+                  <th className="table-header text-left pb-2">Why</th>
                   <th className="table-header text-right pb-2">Change</th>
                   <th className="table-header text-right pb-2">Volume</th>
                   <th className="table-header text-right pb-2"></th>
@@ -94,6 +95,7 @@ export default function OpportunitiesPage() {
                   rankingScore: number; finalScore: number;
                   anomalyScore: number; signalType: string; earlyFlag: boolean;
                   priceChangePct: number; volume: number;
+                  discoveryReason: string | null; discoveryCount: number;
                 }, i: number) => (
                   <tr key={i} className="border-b border-border/30 hover:bg-surface-2/50 transition-colors">
                     <td className="py-3 text-xs text-muted font-mono">{i + 1}</td>
@@ -112,6 +114,16 @@ export default function OpportunitiesPage() {
                       </div>
                     </td>
                     <td className="py-3"><SignalBadge signal={opp.signalType} earlyFlag={opp.earlyFlag} /></td>
+                    <td className="py-3">
+                      {opp.discoveryReason ? (
+                        <div className="flex items-center gap-1.5" title={opp.discoveryReason}>
+                          <span className="badge badge-primary text-[10px]">🧠 Insider</span>
+                          <span className="text-[10px] text-muted truncate max-w-[140px]">{opp.discoveryReason}</span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-faint">benchmark/search</span>
+                      )}
+                    </td>
                     <td className="py-3 text-right">
                       <span className={`text-xs font-mono ${opp.priceChangePct >= 0 ? 'text-success' : 'text-danger'}`}>
                         {formatPct(opp.priceChangePct)}

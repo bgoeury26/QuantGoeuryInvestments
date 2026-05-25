@@ -26,8 +26,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (user.status !== 'APPROVED') throw new UnauthorizedException('Account not approved');
 
     return {
+      id: user.id,
       sub: payload.sub,
       email: payload.email,
+      name: user.name,
       role: user.role,
       status: user.status,
     };

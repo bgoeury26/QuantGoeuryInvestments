@@ -2,15 +2,20 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AlphaService } from './alpha.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
-import { ConfigService } from '@nestjs/config';
 import { SignalType } from '@prisma/client';
+import { StocksService } from '../stocks/stocks.service';
+import { SentimentService } from '../sentiment/sentiment.service';
+import { FlowsService } from '../flows/flows.service';
 
 const mockPrisma = {
   stock: { upsert: jest.fn().mockResolvedValue({ id: 'stock-1', symbol: 'AAPL' }), findUnique: jest.fn().mockResolvedValue({ id: 'stock-1', symbol: 'AAPL' }) },
   stockSignal: { create: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
 };
 const mockCache = { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined) };
-const mockConfig = { get: jest.fn().mockReturnValue(null) };
+// Data services return empty -> all anomaly inputs default to 0.
+const mockStocks = { getHistory: jest.fn().mockResolvedValue({ symbol: 'AAPL', candles: [] }) };
+const mockSentiment = { getVelocity: jest.fn().mockResolvedValue(null) };
+const mockFlows = { getSummary: jest.fn().mockResolvedValue(null) };
 
 describe('AlphaService', () => {
   let service: AlphaService;
@@ -21,7 +26,9 @@ describe('AlphaService', () => {
         AlphaService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CacheService, useValue: mockCache },
-        { provide: ConfigService, useValue: mockConfig },
+        { provide: StocksService, useValue: mockStocks },
+        { provide: SentimentService, useValue: mockSentiment },
+        { provide: FlowsService, useValue: mockFlows },
       ],
     }).compile();
     service = module.get<AlphaService>(AlphaService);
@@ -167,7 +174,8 @@ describe('AlphaService', () => {
     });
 
     it('should return MOMENTUM_IGNITION for high volume + positive price move', () => {
-      const result = service.classifySignal(0.7, 0.1, 0.1, 0.1, 0.05);
+      // sentiment >= 0.3 so the earlier ACCUMULATION rule does not match.
+      const result = service.classifySignal(0.7, 0.4, 0.1, 0.1, 0.05);
       expect(result).toBe(SignalType.MOMENTUM_IGNITION);
     });
 
@@ -177,7 +185,7 @@ describe('AlphaService', () => {
     });
 
     it('should return RISK_WARNING for negative price move', () => {
-      const result = service.classifySignal(0.3, 0.3, 0.3, 0.3, -0.05);
+      const result = service.classifySignal(0.3, 0.3, 0.3, 0.3, -0.06);
       expect(result).toBe(SignalType.RISK_WARNING);
     });
   });
@@ -192,12 +200,16 @@ describe('AlphaService', () => {
       expect(service.isEarlyOpportunity(0.1, 0.01)).toBe(false);
     });
 
-    it('should return false exactly at threshold (0.45)', () => {
-      expect(service.isEarlyOpportunity(0.45, 0.01)).toBe(false);
+    it('should return false exactly at threshold (0.65)', () => {
+      expect(service.isEarlyOpportunity(0.65, 0.01)).toBe(false);
     });
 
-    it('should return true just above threshold (0.46)', () => {
-      expect(service.isEarlyOpportunity(0.46, 0.01)).toBe(true);
+    it('should return true just above threshold (0.66)', () => {
+      expect(service.isEarlyOpportunity(0.66, 0.01)).toBe(true);
+    });
+
+    it('should return false when 5d move exceeds 3%', () => {
+      expect(service.isEarlyOpportunity(0.8, 0.05)).toBe(false);
     });
 
     it('should return false for zero anomaly', () => {

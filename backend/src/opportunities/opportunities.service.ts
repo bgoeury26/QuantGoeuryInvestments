@@ -14,6 +14,12 @@ export interface RankedOpportunity {
   rankingScore: number;
   drivers: string[];
   isEarlyOpportunity: boolean;
+  earlyFlag: boolean;
+  priceChangePct: number;
+  /** Why this ticker is in the universe (set by DailyDiscoveryJob). */
+  discoveryReason: string | null;
+  discoveredAt: string | null;
+  discoveryCount: number;
 }
 
 @Injectable()
@@ -27,6 +33,46 @@ export class OpportunitiesService {
   ) {}
 
   async getTopOpportunities(limit = 10, minScore = 0): Promise<RankedOpportunity[]> {
+    // Fast path: read pre-computed StockScore rows.
+    // Discovered tickers (with a discoveryReason set) bubble up ahead of
+    // benchmark-only rows at equal rank — that's the whole point of the
+    // flow-driven universe.
+    const scores = await this.prisma.stockScore.findMany({
+      orderBy: { rankingScore: 'desc' },
+      take: limit * 3,
+      include: { stock: true },
+    });
+
+    if (scores.length > 0) {
+      return scores
+        .filter((s) => s.rankingScore >= minScore)
+        .sort((a, b) => {
+          const aDisc = a.stock.discoveryReason ? 1 : 0;
+          const bDisc = b.stock.discoveryReason ? 1 : 0;
+          if (aDisc !== bDisc) return bDisc - aDisc;
+          return b.rankingScore - a.rankingScore;
+        })
+        .slice(0, limit)
+        .map((s) => ({
+          symbol: s.stock.symbol,
+          name: s.stock.name,
+          sector: s.stock.sector ?? 'Unknown',
+          finalScore: s.finalScore,
+          anomalyScore: s.anomalyScore,
+          confidence: s.confidenceFactor,
+          signalType: 'momentum',
+          rankingScore: s.rankingScore,
+          drivers: [],
+          isEarlyOpportunity: s.anomalyScore > 0.5,
+          earlyFlag: s.anomalyScore > 0.5,
+          priceChangePct: 0,
+          discoveryReason: s.stock.discoveryReason ?? null,
+          discoveredAt: s.stock.discoveredAt?.toISOString() ?? null,
+          discoveryCount: s.stock.discoveryCount ?? 0,
+        }));
+    }
+
+    // Slow path: compute live if no pre-computed scores exist yet (cold start).
     const stocks = await this.prisma.stock.findMany({ take: 30 });
     const results: RankedOpportunity[] = [];
 
@@ -53,6 +99,11 @@ export class OpportunitiesService {
             rankingScore,
             drivers: anomaly.drivers,
             isEarlyOpportunity: anomaly.isEarlyOpportunity,
+            earlyFlag: anomaly.isEarlyOpportunity,
+            priceChangePct: 0,
+            discoveryReason: stock.discoveryReason ?? null,
+            discoveredAt: stock.discoveredAt?.toISOString() ?? null,
+            discoveryCount: stock.discoveryCount ?? 0,
           });
         }
       } catch (e) {

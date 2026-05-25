@@ -74,6 +74,12 @@ model Stock {
   priceChangePct Float?
   volume         Float?
   avgVolume30d   Float?
+  // Flow-driven discovery: why this ticker is in the universe.
+  // Set by DiscoveryService (e.g. "Insider cluster buy: 3 buyers, $2.4M").
+  // Null for benchmarks (SPY/QQQ) and tickers added via search.
+  discoveryReason String?
+  discoveredAt    DateTime?
+  discoveryCount  Int             @default(0)
   updatedAt      DateTime         @updatedAt
   createdAt      DateTime         @default(now())
   scores         StockScore[]

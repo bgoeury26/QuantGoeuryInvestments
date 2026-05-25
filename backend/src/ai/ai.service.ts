@@ -74,7 +74,7 @@ export class AiService {
     signalType: string; drivers: string[];
   }) {
     const cacheKey = `ai_analysis_${data.symbol}`;
-    const cached = await this.cache.get(cacheKey, {});
+    const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
 
     const hasOpenAI = !!this.config.get("OPENAI_API_KEY");
@@ -96,7 +96,7 @@ export class AiService {
       result = { ...this.ruleBasedAnalysis(data), poweredBy: "Rule-based engine" };
     }
 
-    await this.cache.set(cacheKey, {}, result, 7200); // 2h cache
+    await this.cache.set(cacheKey, result, 7200); // 2h cache
     return result;
   }
 }

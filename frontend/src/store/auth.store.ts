@@ -5,6 +5,7 @@ interface User {
   id: string;
   email: string;
   name: string;
+  role: string;
   status: string;
   isAdmin: boolean;
   createdAt: string;
@@ -16,6 +17,8 @@ interface AuthState {
   isLoading: boolean;
   setUser: (user: User | null) => void;
   setToken: (token: string | null) => void;
+  login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   fetchMe: () => Promise<void>;
 }
@@ -45,27 +48,48 @@ export const useAuthStore = create<AuthState>((set) => ({
   setToken: (token) => {
     set({ token });
     if (token) {
-      setCookie('auth_token', token);
+      setCookie('access_token', token);
     } else {
-      deleteCookie('auth_token');
+      deleteCookie('access_token');
+    }
+  },
+
+  login: async (email: string, password: string) => {
+    set({ isLoading: true });
+    try {
+      const res = await api.post('/auth/login', { email, password });
+      const { access_token, user } = res.data;
+      setCookie('access_token', access_token);
+      set({ token: access_token, user });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  register: async (name: string, email: string, password: string) => {
+    set({ isLoading: true });
+    try {
+      await api.post('/auth/register', { name, email, password });
+    } finally {
+      set({ isLoading: false });
     }
   },
 
   logout: () => {
-    deleteCookie('auth_token');
+    deleteCookie('access_token');
     set({ user: null, token: null });
     window.location.href = '/login';
   },
 
   fetchMe: async () => {
-    const token = getCookie('auth_token');
+    const token = getCookie('access_token');
     if (!token) return;
     try {
       set({ isLoading: true });
       const res = await api.get('/auth/me');
       set({ user: res.data, token });
     } catch (_) {
-      deleteCookie('auth_token');
+      deleteCookie('access_token');
       set({ user: null, token: null });
     } finally {
       set({ isLoading: false });

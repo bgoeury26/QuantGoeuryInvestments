@@ -17,6 +17,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { AdminModule } from './admin/admin.module';
 import { AiModule } from './ai/ai.module';
+import { DiscoveryModule } from './discovery/discovery.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthController } from './health.controller';
     SettingsModule,
     AdminModule,
     AiModule,
+    DiscoveryModule,
   ],
   controllers: [HealthController],
 })

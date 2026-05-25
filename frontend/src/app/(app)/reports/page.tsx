@@ -30,7 +30,7 @@ export default function ReportsPage() {
   };
 
   const downloadPdf = async (reportId: string) => {
-    const { data } = await api.get(`/reports/${reportId}/pdf`, { responseType: 'blob' });
+    const { data } = await api.get(`/reports/${reportId}/download`, { responseType: 'blob' });
     const url = window.URL.createObjectURL(new Blob([data]));
     const a = document.createElement('a');
     a.href = url; a.download = `report-${reportId}.pdf`; a.click();

@@ -43,14 +43,14 @@ export class SettingsService {
     if (!s) s = await this.prisma.userSettings.create({ data: { userId, gdeltEnabled: true } });
 
     return {
-      fmp:          this.maskKey(this.decrypt(s.fmpApiKey ?? '')),
-      finnhub:      this.maskKey(this.decrypt(s.finnhubApiKey ?? '')),
-      polygon:      this.maskKey(this.decrypt(s.polygonApiKey ?? '')),
-      alphaVantage: this.maskKey(this.decrypt(s.alphaVantageKey ?? '')),
-      newsApi:      this.maskKey(this.decrypt(s.newsApiKey ?? '')),
-      fred:         this.maskKey(this.decrypt(s.fredApiKey ?? '')),
-      reddit:       this.maskKey(this.decrypt(s.redditClientId ?? '')),
-      bluesky:      this.maskKey(this.decrypt(s.blueskyIdentifier ?? '')),
+      fmp:          this.decrypt(s.fmpApiKey ?? ''),
+      finnhub:      this.decrypt(s.finnhubApiKey ?? ''),
+      polygon:      this.decrypt(s.polygonApiKey ?? ''),
+      alphaVantage: this.decrypt(s.alphaVantageKey ?? ''),
+      newsApi:      this.decrypt(s.newsApiKey ?? ''),
+      fred:         this.decrypt(s.fredApiKey ?? ''),
+      reddit:       this.decrypt(s.redditClientId ?? ''),
+      bluesky:      this.decrypt(s.blueskyIdentifier ?? ''),
       gdeltEnabled: s.gdeltEnabled,
     };
   }

@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
-import { ConfigService } from '@nestjs/config';
+import { StocksService } from '../stocks/stocks.service';
+import { SentimentService } from '../sentiment/sentiment.service';
+import { FlowsService } from '../flows/flows.service';
 import { SignalType } from '@prisma/client';
-import axios from 'axios';
+import { mean, stdev } from '../common/http.util';
 
 export interface AnomalyResult {
   symbol: string;
@@ -16,9 +18,17 @@ export interface AnomalyResult {
   drivers: string[];
   isEarlyOpportunity: boolean;
   confidence: number;
-  priceChange24h: number;
+  priceChange5d: number;
 }
 
+/**
+ * Alpha Engine — REWRITTEN.
+ *
+ * Removed Math.random() from sentimentVelocity and institutionalShift, and
+ * dropped Finnhub /stock/candle (403 on free tier). Volume anomaly now uses
+ * Polygon OHLCV via StocksService; sentiment velocity uses the real news
+ * velocity ratio; insider/institutional activity uses SEC EDGAR via FlowsService.
+ */
 @Injectable()
 export class AlphaService {
   private readonly logger = new Logger(AlphaService.name);
@@ -26,89 +36,96 @@ export class AlphaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cache: CacheService,
-    private readonly config: ConfigService,
+    private readonly stocks: StocksService,
+    private readonly sentiment: SentimentService,
+    private readonly flows: FlowsService,
   ) {}
 
   async detectAnomaly(symbol: string): Promise<AnomalyResult> {
-    const cacheKey = `alpha:anomaly:${symbol}`;
+    const upper = symbol.toUpperCase();
+    const cacheKey = `alpha:anomaly:${upper}`;
     const cached = await this.cache.get<AnomalyResult>(cacheKey);
     if (cached) return cached;
 
-    const finnhubKey = this.config.get<string>('FINNHUB_API_KEY');
-
-    const [candleRes, quoteRes, insiderRes] = await Promise.allSettled([
-      finnhubKey
-        ? axios.get(`https://finnhub.io/api/v1/stock/candle`, {
-            params: { symbol, resolution: 'D', from: Math.floor(Date.now() / 1000) - 86400 * 35, to: Math.floor(Date.now() / 1000), token: finnhubKey },
-          }).then(r => r.data)
-        : Promise.resolve(null),
-      finnhubKey
-        ? axios.get(`https://finnhub.io/api/v1/quote`, { params: { symbol, token: finnhubKey } }).then(r => r.data)
-        : Promise.resolve(null),
-      finnhubKey
-        ? axios.get(`https://finnhub.io/api/v1/stock/insider-transactions`, { params: { symbol, token: finnhubKey } }).then(r => r.data)
-        : Promise.resolve(null),
+    const [histR, velR, flowR] = await Promise.allSettled([
+      this.stocks.getHistory(upper, 35),
+      this.sentiment.getVelocity(upper),
+      this.flows.getSummary(upper),
     ]);
+    const history: any = histR.status === 'fulfilled' ? histR.value : null;
+    const velocity: any = velR.status === 'fulfilled' ? velR.value : null;
+    const flow: any = flowR.status === 'fulfilled' ? flowR.value : null;
 
-    // Volume anomaly
+    const candles: any[] = history?.candles ?? [];
+
+    // --- Volume anomaly: z-score of latest volume vs 30-day window ---
     let volumeAnomaly = 0;
-    if (candleRes.status === 'fulfilled' && candleRes.value?.v) {
-      const volumes: number[] = candleRes.value.v;
-      if (volumes.length >= 5) {
+    let priceChange5d = 0;
+    if (candles.length >= 6) {
+      const volumes = candles.map((c) => c.volume).filter((v) => v != null);
+      if (volumes.length >= 6) {
         const recent = volumes[volumes.length - 1];
-        const avg = volumes.slice(0, -1).reduce((a: number, b: number) => a + b, 0) / (volumes.length - 1);
-        const std = Math.sqrt(volumes.slice(0, -1).reduce((a: number, b: number) => a + Math.pow(b - avg, 2), 0) / (volumes.length - 1));
-        volumeAnomaly = std > 0 ? Math.min(Math.max((recent - avg) / std / 3, 0), 1) : 0;
+        const hist = volumes.slice(0, -1);
+        const sd = stdev(hist);
+        const z = sd > 0 ? (recent - mean(hist)) / sd : 0;
+        volumeAnomaly = Math.min(Math.max(z / 3, 0), 1); // z=3 -> 1.0
       }
+      const closes = candles.map((c) => c.close);
+      const last = closes[closes.length - 1];
+      const fiveBack = closes[Math.max(0, closes.length - 6)];
+      if (fiveBack) priceChange5d = (last - fiveBack) / fiveBack;
     }
 
-    // Price change
-    let priceChange24h = 0;
-    let sentimentVelocity = Math.random() * 0.3;
-    if (quoteRes.status === 'fulfilled' && quoteRes.value) {
-      const q = quoteRes.value;
-      priceChange24h = q.dp ? q.dp / 100 : 0;
-      sentimentVelocity = Math.min(Math.abs(priceChange24h) * 5 + Math.random() * 0.2, 1);
-    }
+    // --- Sentiment velocity: real news velocity ratio (>1 accelerating) ---
+    const sentimentVelocity = velocity
+      ? Math.min(Math.max((velocity.velocityRatio - 1) / 3, 0), 1)
+      : 0;
 
-    // Insider activity
-    let insiderActivity = 0;
-    if (insiderRes.status === 'fulfilled' && insiderRes.value) {
-      const trades: any[] = insiderRes.value?.data || [];
-      const recentBuys = trades.filter((t: any) => t.transactionType === 'P' && new Date(t.transactionDate) > new Date(Date.now() - 30 * 86400 * 1000));
-      insiderActivity = Math.min(recentBuys.length / 5, 1);
-    }
+    // --- Insider activity: recent Form 4 count, normalized ---
+    const insiderActivity = flow
+      ? Math.min((flow.insider?.recentForm4 ?? 0) / 8, 1)
+      : 0;
 
-    const institutionalShift = Math.random() * 0.4;
+    // --- Institutional shift: recent 13F filing count, normalized ---
+    const institutionalShift = flow
+      ? Math.min((flow.institutional?.recentFilings ?? 0) / 15, 1)
+      : 0;
 
-    const anomalyScore = this.computeAnomalyScore(volumeAnomaly, sentimentVelocity, insiderActivity, institutionalShift);
-    const signalType = this.classifySignal(volumeAnomaly, sentimentVelocity, insiderActivity, institutionalShift, priceChange24h);
-    const isEarlyOpportunity = this.isEarlyOpportunity(anomalyScore, Math.abs(priceChange24h));
-    const confidence = Math.min(0.5 + anomalyScore * 0.5 + (finnhubKey ? 0.2 : 0), 1.2);
+    const anomalyScore = this.computeAnomalyScore(
+      volumeAnomaly, sentimentVelocity, insiderActivity, institutionalShift,
+    );
+    const signalType = this.classifySignal(
+      volumeAnomaly, sentimentVelocity, insiderActivity, institutionalShift, priceChange5d,
+    );
+    const isEarlyOpportunity = this.isEarlyOpportunity(anomalyScore, Math.abs(priceChange5d));
+
+    // Confidence from data availability — deterministic.
+    const sources = [candles.length >= 6, !!velocity, !!flow].filter(Boolean).length;
+    const confidence = Math.min(0.5 + sources * 0.2 + anomalyScore * 0.1, 1.2);
 
     const drivers: string[] = [];
-    if (volumeAnomaly > 0.4) drivers.push('Volume spike detected');
-    if (sentimentVelocity > 0.4) drivers.push('Sentiment acceleration');
-    if (insiderActivity > 0.3) drivers.push('Insider buying cluster');
-    if (institutionalShift > 0.3) drivers.push('Institutional rotation');
+    if (volumeAnomaly > 0.4) drivers.push('Unusual volume spike vs 30-day average');
+    if (sentimentVelocity > 0.4) drivers.push('News velocity accelerating');
+    if (insiderActivity > 0.3) drivers.push('Recent insider (Form 4) filing cluster');
+    if (institutionalShift > 0.3) drivers.push('Elevated 13F institutional filings');
     if (drivers.length === 0) drivers.push('Normal market activity');
 
     const result: AnomalyResult = {
-      symbol, anomalyScore, volumeAnomaly, sentimentVelocity,
-      insiderActivity, institutionalShift, signalType, drivers,
-      isEarlyOpportunity, confidence, priceChange24h,
+      symbol: upper, anomalyScore: r2(anomalyScore), volumeAnomaly: r2(volumeAnomaly),
+      sentimentVelocity: r2(sentimentVelocity), insiderActivity: r2(insiderActivity),
+      institutionalShift: r2(institutionalShift), signalType, drivers,
+      isEarlyOpportunity, confidence: r2(confidence), priceChange5d: r2(priceChange5d),
     };
 
-    // Persist to DB
     try {
       const stock = await this.prisma.stock.upsert({
-        where: { symbol },
-        create: { symbol, name: symbol },
+        where: { symbol: upper },
+        create: { symbol: upper, name: upper },
         update: {},
       });
       await this.prisma.stockSignal.create({
         data: {
-          stockId: stock.id,
+          stock: { connect: { id: stock.id } },
           signalType,
           strength: anomalyScore,
           description: drivers.join('; '),
@@ -117,7 +134,7 @@ export class AlphaService {
         },
       });
     } catch (e) {
-      this.logger.warn(`Could not persist signal for ${symbol}: ${e}`);
+      this.logger.warn(`Could not persist signal for ${upper}: ${e}`);
     }
 
     await this.cache.set(cacheKey, result, 300);
@@ -129,18 +146,19 @@ export class AlphaService {
   }
 
   classifySignal(
-    vol: number, sent: number, insider: number, inst: number, priceChange: number,
+    vol: number, sent: number, insider: number, inst: number, priceChange5d: number,
   ): SignalType {
-    if (priceChange < -0.03) return SignalType.RISK_WARNING;
+    if (priceChange5d < -0.05) return SignalType.RISK_WARNING;
     if (insider > 0.5 && inst > 0.4) return SignalType.SMART_MONEY_ENTRY;
     if (vol > 0.6 && sent < 0.3) return SignalType.ACCUMULATION;
     if (sent > 0.6 && vol < 0.3) return SignalType.SENTIMENT_PUMP;
-    if (vol > 0.6 && priceChange > 0.03) return SignalType.MOMENTUM_IGNITION;
+    if (vol > 0.6 && priceChange5d > 0.03) return SignalType.MOMENTUM_IGNITION;
     return SignalType.NEUTRAL;
   }
 
-  isEarlyOpportunity(anomalyScore: number, absPriceChange: number): boolean {
-    return anomalyScore > 0.45 && absPriceChange < 0.05;
+  /** README spec: anomaly > 0.65 AND |5d move| < 3%. */
+  isEarlyOpportunity(anomalyScore: number, abs5dChange: number): boolean {
+    return anomalyScore > 0.65 && abs5dChange < 0.03;
   }
 
   async getEarlyOpportunities(): Promise<any[]> {
@@ -153,7 +171,7 @@ export class AlphaService {
   }
 
   async getLatestSignals(symbol: string): Promise<any[]> {
-    const stock = await this.prisma.stock.findUnique({ where: { symbol } });
+    const stock = await this.prisma.stock.findUnique({ where: { symbol: symbol.toUpperCase() } });
     if (!stock) return [];
     return this.prisma.stockSignal.findMany({
       where: { stockId: stock.id },
@@ -162,3 +180,5 @@ export class AlphaService {
     });
   }
 }
+
+const r2 = (n: number) => Math.round(n * 1000) / 1000;
